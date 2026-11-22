@@ -3,8 +3,8 @@ import UserNotifications
 
 /// Schedules local macOS notifications for installs approaching / past the 7-day signing window.
 enum ExpiryNotifier {
-    private static let soonPrefix = "renuvio.expiry.soon."
-    private static let expiredPrefix = "renuvio.expiry.expired."
+    private static let soonPrefix = "renewio.expiry.soon."
+    private static let expiredPrefix = "renewio.expiry.expired."
     /// Match the UI "Renew soon" threshold.
     static let renewSoonLeadTime: TimeInterval = 48 * 60 * 60
 
@@ -12,7 +12,7 @@ enum ExpiryNotifier {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    static func reschedule(for config: ReNuvioConfig?) {
+    static func reschedule(for config: RenewioConfig?) {
         let center = UNUserNotificationCenter.current()
         center.getPendingNotificationRequests { pending in
             let ours = pending
@@ -41,7 +41,7 @@ enum ExpiryNotifier {
                     schedule(
                         id: expiredPrefix + install.id.uuidString,
                         title: "\(install.name) expired",
-                        body: "Signing lapsed on \(deviceName). Open ReNuvio and renew.",
+                        body: "Signing lapsed on \(deviceName). Open Renewio and renew.",
                         at: expiresAt
                     )
                 }
@@ -67,7 +67,7 @@ enum ExpiryNotifier {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
-    private static func deliverImmediateWarningsIfNeeded(for config: ReNuvioConfig?) {
+    private static func deliverImmediateWarningsIfNeeded(for config: RenewioConfig?) {
         guard let config else { return }
         let now = Date()
         let defaults = UserDefaults.standard
@@ -76,7 +76,7 @@ enum ExpiryNotifier {
             guard let expiresAt = install.expiresAt else { continue }
             let remaining = expiresAt.timeIntervalSince(now)
             let deviceName = config.devices.first(where: { $0.id == install.deviceID })?.name ?? "device"
-            let dayKey = "renuvio.expiry.nudge.\(install.id.uuidString)"
+            let dayKey = "renewio.expiry.nudge.\(install.id.uuidString)"
             let last = defaults.object(forKey: dayKey) as? Date
             if let last, now.timeIntervalSince(last) < 20 * 60 * 60 {
                 continue
@@ -87,7 +87,7 @@ enum ExpiryNotifier {
 
             if remaining <= 0 {
                 content.title = "\(install.name) expired"
-                content.body = "Signing lapsed on \(deviceName). Open ReNuvio and renew."
+                content.body = "Signing lapsed on \(deviceName). Open Renewio and renew."
             } else if remaining <= renewSoonLeadTime {
                 let hours = max(1, Int(remaining / 3600))
                 content.title = "\(install.name) expires soon"
@@ -98,7 +98,7 @@ enum ExpiryNotifier {
 
             defaults.set(now, forKey: dayKey)
             let request = UNNotificationRequest(
-                identifier: "renuvio.expiry.nudge.\(install.id.uuidString).\(Int(now.timeIntervalSince1970))",
+                identifier: "renewio.expiry.nudge.\(install.id.uuidString).\(Int(now.timeIntervalSince1970))",
                 content: content,
                 trigger: nil
             )

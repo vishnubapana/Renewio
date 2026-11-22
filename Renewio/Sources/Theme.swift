@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-enum ReNuvioTheme {
+enum RenewioTheme {
     static let background = Color(red: 10 / 255, green: 10 / 255, blue: 15 / 255) // #0A0A0F
     static let backgroundAlt = Color(red: 18 / 255, green: 18 / 255, blue: 26 / 255) // #12121A
     static let card = Color(red: 26 / 255, green: 26 / 255, blue: 36 / 255).opacity(0.6)
@@ -23,11 +23,11 @@ enum ReNuvioTheme {
 struct AmbientBackdrop: View {
     var body: some View {
         ZStack(alignment: .top) {
-            ReNuvioTheme.background
+            RenewioTheme.background
             RadialGradient(
                 colors: [
-                    ReNuvioTheme.accent.opacity(0.07),
-                    ReNuvioTheme.accent.opacity(0.02),
+                    RenewioTheme.accent.opacity(0.07),
+                    RenewioTheme.accent.opacity(0.02),
                     Color.clear,
                 ],
                 center: .top,
@@ -40,8 +40,8 @@ struct AmbientBackdrop: View {
 }
 
 struct CardSurface: View {
-    var fill: Color = ReNuvioTheme.cardSolid.opacity(0.75)
-    var border: Color = ReNuvioTheme.border
+    var fill: Color = RenewioTheme.cardSolid.opacity(0.75)
+    var border: Color = RenewioTheme.border
     var cornerRadius: CGFloat = 12
 
     var body: some View {
@@ -78,7 +78,7 @@ struct SectionCard<Trailing: View, Content: View>: View {
                 Text(title)
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .tracking(0.6)
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
                 Spacer()
                 trailing()
             }
@@ -113,11 +113,11 @@ struct SelectableOptionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ReNuvioTheme.foreground)
+                        .foregroundStyle(RenewioTheme.foreground)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                         .lineLimit(1)
                         .truncationMode(subtitleTruncation)
                 }
@@ -126,16 +126,16 @@ struct SelectableOptionRow: View {
                     .font(.system(size: 14))
                     .foregroundStyle(
                         isSelected
-                            ? ReNuvioTheme.accent
-                            : ReNuvioTheme.mutedForeground.opacity(0.45)
+                            ? RenewioTheme.accent
+                            : RenewioTheme.mutedForeground.opacity(0.45)
                     )
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
                 CardSurface(
-                    fill: isSelected ? ReNuvioTheme.accent.opacity(0.12) : Color.white.opacity(0.03),
-                    border: isSelected ? ReNuvioTheme.accent.opacity(0.45) : ReNuvioTheme.border,
+                    fill: isSelected ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.03),
+                    border: isSelected ? RenewioTheme.accent.opacity(0.45) : RenewioTheme.border,
                     cornerRadius: 8
                 )
             )
@@ -161,7 +161,7 @@ struct PopoverIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: iconSize, weight: iconWeight))
-                .foregroundStyle(isHovered ? hoverTint : ReNuvioTheme.mutedForeground)
+                .foregroundStyle(isHovered ? hoverTint : RenewioTheme.mutedForeground)
                 .frame(width: 32, height: 32)
                 .background(
                     isHovered ? hoverTint.opacity(0.15) : Color.white.opacity(0.05)
@@ -170,7 +170,7 @@ struct PopoverIconButton: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(
-                            isHovered ? hoverTint.opacity(0.45) : ReNuvioTheme.border,
+                            isHovered ? hoverTint.opacity(0.45) : RenewioTheme.border,
                             lineWidth: 1
                         )
                 )
@@ -217,14 +217,14 @@ struct InlineActionLink: View {
             }
             .foregroundStyle(
                 disabled
-                    ? ReNuvioTheme.mutedForeground.opacity(0.5)
-                    : (isHovered ? ReNuvioTheme.accent : ReNuvioTheme.mutedForeground)
+                    ? RenewioTheme.mutedForeground.opacity(0.5)
+                    : (isHovered ? RenewioTheme.accent : RenewioTheme.mutedForeground)
             )
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered && !disabled ? ReNuvioTheme.accent.opacity(0.12) : Color.white.opacity(0.04))
+                    .fill(isHovered && !disabled ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.04))
             )
         }
         .buttonStyle(.plain)
@@ -257,11 +257,11 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
-            .background(ReNuvioTheme.accent.opacity(isEnabled ? 1 : 0.4))
-            .foregroundStyle(ReNuvioTheme.accentForeground)
+            .background(RenewioTheme.accent.opacity(isEnabled ? 1 : 0.4))
+            .foregroundStyle(RenewioTheme.accentForeground)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .shadow(
-                color: isEnabled ? ReNuvioTheme.accent.opacity(configuration.isPressed ? 0.2 : 0.35) : .clear,
+                color: isEnabled ? RenewioTheme.accent.opacity(configuration.isPressed ? 0.2 : 0.35) : .clear,
                 radius: 12
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
@@ -277,7 +277,7 @@ struct SecondaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
             .background(Color.white.opacity(configuration.isPressed ? 0.08 : 0.04))
-            .foregroundStyle(ReNuvioTheme.foreground)
+            .foregroundStyle(RenewioTheme.foreground)
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.white.opacity(0.15), lineWidth: 1)
@@ -286,7 +286,7 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
-struct ReNuvioTextFieldStyle: TextFieldStyle {
+struct RenewioTextFieldStyle: TextFieldStyle {
     var monospaced = false
 
     func _body(configuration: TextField<Self._Label>) -> some View {
@@ -294,12 +294,12 @@ struct ReNuvioTextFieldStyle: TextFieldStyle {
             .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(ReNuvioTheme.background.opacity(0.75))
-            .foregroundStyle(ReNuvioTheme.foreground)
+            .background(RenewioTheme.background.opacity(0.75))
+            .foregroundStyle(RenewioTheme.foreground)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(ReNuvioTheme.border, lineWidth: 1)
+                    .stroke(RenewioTheme.border, lineWidth: 1)
             )
     }
 }

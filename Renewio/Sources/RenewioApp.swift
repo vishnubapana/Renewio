@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct ReNuvioApp: App {
+struct RenewioApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("ReNuvio", systemImage: "arrow.triangle.2.circlepath") {
+        MenuBarExtra("Renewio", systemImage: "arrow.triangle.2.circlepath") {
             Group {
                 if model.showOnboarding {
                     OnboardingView()
@@ -15,7 +15,7 @@ struct ReNuvioApp: App {
                         .environmentObject(model)
                 }
             }
-            .frame(width: ReNuvioTheme.popoverWidth)
+            .frame(width: RenewioTheme.popoverWidth)
             .background(AmbientBackdrop())
             .environment(\.colorScheme, .dark)
         }

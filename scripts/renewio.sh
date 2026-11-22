@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ReNuvio renew pipeline — Apple-native CLI only.
+# Renewio renew pipeline — Apple-native CLI only.
 # Emits structured lines for the menu bar app:
 #   [STAGE] name|human label
 #   [INFO] message
@@ -8,38 +8,62 @@
 set -euo pipefail
 
 REPO="${GITHUB_REPO:-bobsupra/NuvioTVOS}"
-PLATFORM="${RENUVIO_PLATFORM:-tvos}"
-SUPPORT_DIR="${RENUVIO_SUPPORT_DIR:-$HOME/Library/Application Support/ReNuvio}"
+PLATFORM="${RENEWIO_PLATFORM:-tvos}"
+SUPPORT_DIR="${RENEWIO_SUPPORT_DIR:-$HOME/Library/Application Support/Renewio}"
 WORK_DIR="$SUPPORT_DIR/work"
-LOG_DIR="${RENUVIO_LOG_DIR:-$HOME/Library/Logs/ReNuvio}"
-CONFIG_PATH="${RENUVIO_CONFIG:-$SUPPORT_DIR/config.json}"
+LOG_DIR="${RENEWIO_LOG_DIR:-$HOME/Library/Logs/Renewio}"
+CONFIG_PATH="${RENEWIO_CONFIG:-$SUPPORT_DIR/config.json}"
+
+# Migrate folders from the previous ReNuvio product name when present.
+migrate_renuvio_dir() {
+  local legacy="$1"
+  local modern="$2"
+  [[ -d "$legacy" ]] || return 0
+  if [[ ! -e "$modern" ]]; then
+    mv "$legacy" "$modern"
+    return 0
+  fi
+  # Merge missing children into the modern path, then drop the legacy folder.
+  local child
+  for child in "$legacy"/* "$legacy"/.[!.]* "$legacy"/..?*; do
+    [[ -e "$child" ]] || continue
+    local base
+    base="$(basename "$child")"
+    if [[ ! -e "$modern/$base" ]]; then
+      mv "$child" "$modern/$base"
+    fi
+  done
+  rm -rf "$legacy"
+}
+migrate_renuvio_dir "$HOME/Library/Application Support/ReNuvio" "$SUPPORT_DIR"
+migrate_renuvio_dir "$HOME/Library/Logs/ReNuvio" "$LOG_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Prefer sibling Resources when running from the app bundle.
 if [[ -d "$SCRIPT_DIR/ProvisioningStub/ProvisioningStub.xcodeproj" ]]; then
   STUB_ROOT="$SCRIPT_DIR/ProvisioningStub"
-elif [[ -d "$SCRIPT_DIR/../ReNuvio/Resources/ProvisioningStub/ProvisioningStub.xcodeproj" ]]; then
-  STUB_ROOT="$(cd "$SCRIPT_DIR/../ReNuvio/Resources/ProvisioningStub" && pwd)"
+elif [[ -d "$SCRIPT_DIR/../Renewio/Resources/ProvisioningStub/ProvisioningStub.xcodeproj" ]]; then
+  STUB_ROOT="$(cd "$SCRIPT_DIR/../Renewio/Resources/ProvisioningStub" && pwd)"
 elif [[ -d "$SCRIPT_DIR/ProvisioningStub.xcodeproj" ]]; then
   STUB_ROOT="$SCRIPT_DIR"
 else
   STUB_ROOT=""
 fi
 
-TEAM_ID="${RENUVIO_TEAM_ID:-}"
-BUNDLE_ID="${RENUVIO_BUNDLE_ID:-}"
-DEVICE_ID="${RENUVIO_DEVICE_ID:-}"
-DEVICE_NAME="${RENUVIO_DEVICE_NAME:-}"
-SELECTED_IPA="${RENUVIO_IPA:-}"
-SELECTED_TAG="${RENUVIO_TAG:-}"
-MAX_CACHED_IPAS="${RENUVIO_MAX_CACHED_IPAS:-3}"
+TEAM_ID="${RENEWIO_TEAM_ID:-}"
+BUNDLE_ID="${RENEWIO_BUNDLE_ID:-}"
+DEVICE_ID="${RENEWIO_DEVICE_ID:-}"
+DEVICE_NAME="${RENEWIO_DEVICE_NAME:-}"
+SELECTED_IPA="${RENEWIO_IPA:-}"
+SELECTED_TAG="${RENEWIO_TAG:-}"
+MAX_CACHED_IPAS="${RENEWIO_MAX_CACHED_IPAS:-3}"
 DRY_RUN=0
 SKIP_INSTALL=0
 NO_CONFIG_WRITE=0
 
 usage() {
   cat <<'EOF'
-Usage: renew-nuvio.sh [options]
+Usage: renewio.sh [options]
 
 Options:
   --team-id ID          Apple Development Team ID
@@ -50,7 +74,7 @@ Options:
   --platform PLATFORM   tvos|ios (default: tvos)
   --ipa FILE            Use a specific cached IPA filename/path instead of fetching latest
   --tag TAG             Install a specific GitHub release tag (uses cache if already downloaded)
-  --config PATH         Config JSON (default: ~/Library/Application Support/ReNuvio/config.json)
+  --config PATH         Config JSON (default: ~/Library/Application Support/Renewio/config.json)
   --no-config-write     Do not update config.json after success (app owns v2 schema)
   --dry-run             Resolve release + check device; do not download/sign/install
   --skip-install        Download + sign only
@@ -205,7 +229,7 @@ humanize_device_error() {
   if echo "$raw" | grep -qiE 'timed out|CoreDeviceService'; then
     echo "Could not talk to Apple's device service. Make sure Xcode is installed and try again in a few seconds."
   elif echo "$raw" | grep -qiE 'not found|No devices|empty'; then
-    echo "${DEVICE_KIND} not found. Pair it in Xcode → Window → Devices and Simulators, keep it awake, then update credentials in ReNuvio."
+    echo "${DEVICE_KIND} not found. Pair it in Xcode → Window → Devices and Simulators, keep it awake, then update credentials in Renewio."
   elif echo "$raw" | grep -qiE 'offline|unavailable|not connected'; then
     echo "${DEVICE_KIND} is offline or asleep. Wake it, confirm it is paired in Xcode, then retry."
   else
@@ -335,7 +359,7 @@ fetch_release() {
   set +e
   http=$(curl -sS -L -o "$json" -w "%{http_code}" \
     -H "Accept: application/vnd.github+json" \
-    -H "User-Agent: ReNuvio" \
+    -H "User-Agent: Renewio" \
     "$api")
   local rc=$?
   set -e
@@ -445,7 +469,7 @@ download_ipa() {
   info "Downloading ${ASSET_NAME} (${ASSET_SIZE} bytes)"
   local tmp="$IPA_PATH.partial"
   if ! curl -sS -L --fail -o "$tmp" \
-      -H "User-Agent: ReNuvio" \
+      -H "User-Agent: Renewio" \
       -H "Accept: application/octet-stream" \
       "$ASSET_URL"; then
     rm -f "$tmp"

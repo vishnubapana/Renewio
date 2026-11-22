@@ -23,7 +23,7 @@ enum DevicePlatform: String, Codable, CaseIterable, Hashable, Identifiable {
         }
     }
 
-    /// Platform string passed to xcodebuild / renew-nuvio.sh.
+    /// Platform string passed to xcodebuild / renewio.sh.
     var scriptPlatform: String {
         switch self {
         case .tvos: return "tvos"
@@ -113,7 +113,7 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
     }
 }
 
-struct ReNuvioConfig: Codable, Equatable {
+struct RenewioConfig: Codable, Equatable {
     var schemaVersion: Int
     var teamID: String
     var devices: [TrackedDevice]
@@ -123,7 +123,7 @@ struct ReNuvioConfig: Codable, Equatable {
     static let currentSchemaVersion = 2
 
     init(
-        schemaVersion: Int = ReNuvioConfig.currentSchemaVersion,
+        schemaVersion: Int = RenewioConfig.currentSchemaVersion,
         teamID: String,
         devices: [TrackedDevice] = [],
         installs: [TrackedAppInstall] = [],
@@ -212,7 +212,7 @@ struct ReNuvioConfig: Codable, Equatable {
 }
 
 /// Legacy v1 flat config used only for migration.
-private struct LegacyReNuvioConfig: Codable {
+private struct LegacyRenewioConfig: Codable {
     var teamID: String?
     var bundleID: String?
     var deviceID: String?
@@ -307,16 +307,51 @@ enum GitHubSource {
 
 @MainActor
 final class ConfigStore: ObservableObject {
-    @Published private(set) var config: ReNuvioConfig?
+    @Published private(set) var config: RenewioConfig?
 
     private let fileURL: URL
 
     init(fileURL: URL? = nil) {
+        Self.migrateLegacySupportDirectoriesIfNeeded()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("ReNuvio", isDirectory: true)
+            .appendingPathComponent("Renewio", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         self.fileURL = fileURL ?? support.appendingPathComponent("config.json")
         reload()
+    }
+
+    /// Moves Application Support / Logs from the old ReNuvio folder names into Renewio.
+    private static func migrateLegacySupportDirectoriesIfNeeded() {
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let library = fm.urls(for: .libraryDirectory, in: .userDomainMask).first!
+        let pairs: [(URL, URL)] = [
+            (
+                appSupport.appendingPathComponent("ReNuvio", isDirectory: true),
+                appSupport.appendingPathComponent("Renewio", isDirectory: true)
+            ),
+            (
+                library.appendingPathComponent("Logs/ReNuvio", isDirectory: true),
+                library.appendingPathComponent("Logs/Renewio", isDirectory: true)
+            ),
+        ]
+        for (legacy, modern) in pairs {
+            guard fm.fileExists(atPath: legacy.path) else { continue }
+            if !fm.fileExists(atPath: modern.path) {
+                try? fm.moveItem(at: legacy, to: modern)
+                continue
+            }
+            // Prefer keeping modern; copy missing children from legacy, then remove legacy.
+            if let children = try? fm.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil) {
+                for child in children {
+                    let dest = modern.appendingPathComponent(child.lastPathComponent)
+                    if !fm.fileExists(atPath: dest.path) {
+                        try? fm.moveItem(at: child, to: dest)
+                    }
+                }
+            }
+            try? fm.removeItem(at: legacy)
+        }
     }
 
     var needsOnboarding: Bool {
@@ -330,23 +365,23 @@ final class ConfigStore: ObservableObject {
         }
         do {
             let data = try Data(contentsOf: fileURL)
-            if let decoded = try? JSONDecoder().decode(ReNuvioConfig.self, from: data),
+            if let decoded = try? JSONDecoder().decode(RenewioConfig.self, from: data),
                !decoded.devices.isEmpty || !decoded.installs.isEmpty || decoded.schemaVersion >= 2 {
                 var value = decoded
-                if value.schemaVersion < ReNuvioConfig.currentSchemaVersion {
-                    value.schemaVersion = ReNuvioConfig.currentSchemaVersion
+                if value.schemaVersion < RenewioConfig.currentSchemaVersion {
+                    value.schemaVersion = RenewioConfig.currentSchemaVersion
                 }
                 if value.selectedDeviceID == nil {
                     value.selectedDeviceID = value.devices.first?.id
                 }
                 config = value
-                if decoded.schemaVersion < ReNuvioConfig.currentSchemaVersion {
+                if decoded.schemaVersion < RenewioConfig.currentSchemaVersion {
                     try? save(value)
                 }
                 return
             }
 
-            if let legacy = try? JSONDecoder().decode(LegacyReNuvioConfig.self, from: data),
+            if let legacy = try? JSONDecoder().decode(LegacyRenewioConfig.self, from: data),
                let migrated = Self.migrateLegacy(legacy) {
                 config = migrated
                 try? save(migrated)
@@ -359,9 +394,9 @@ final class ConfigStore: ObservableObject {
         }
     }
 
-    func save(_ value: ReNuvioConfig) throws {
+    func save(_ value: RenewioConfig) throws {
         var next = value
-        next.schemaVersion = ReNuvioConfig.currentSchemaVersion
+        next.schemaVersion = RenewioConfig.currentSchemaVersion
         if next.selectedDeviceID == nil {
             next.selectedDeviceID = next.devices.first?.id
         }
@@ -372,7 +407,7 @@ final class ConfigStore: ObservableObject {
         config = next
     }
 
-    private static func migrateLegacy(_ legacy: LegacyReNuvioConfig) -> ReNuvioConfig? {
+    private static func migrateLegacy(_ legacy: LegacyRenewioConfig) -> RenewioConfig? {
         let teamID = (legacy.teamID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let deviceID = (legacy.deviceID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let bundleID = (legacy.bundleID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -393,8 +428,8 @@ final class ConfigStore: ObservableObject {
             lastInstalledAt: legacy.lastInstalledAt,
             lastAssetName: legacy.lastAssetName
         )
-        return ReNuvioConfig(
-            schemaVersion: ReNuvioConfig.currentSchemaVersion,
+        return RenewioConfig(
+            schemaVersion: RenewioConfig.currentSchemaVersion,
             teamID: teamID,
             devices: [device],
             installs: [install],
@@ -412,7 +447,7 @@ final class ConfigStore: ObservableObject {
 
     static var downloadsRootURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("ReNuvio/downloads", isDirectory: true)
+            .appendingPathComponent("Renewio/downloads", isDirectory: true)
     }
 
     static func downloadsDirectoryURL(forRepo repo: String) -> URL {
@@ -474,7 +509,7 @@ final class ConfigStore: ObservableObject {
               let url = URL(string: "https://api.github.com/repos/\(encoded)")
         else {
             throw NSError(
-                domain: "ReNuvio",
+                domain: "Renewio",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Paste a GitHub HTTPS clone link or owner/repo."]
             )
@@ -482,13 +517,13 @@ final class ConfigStore: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("ReNuvio", forHTTPHeaderField: "User-Agent")
+        request.setValue("Renewio", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw NSError(
-                domain: "ReNuvio",
+                domain: "Renewio",
                 code: http.statusCode,
                 userInfo: [NSLocalizedDescriptionKey: "GitHub returned HTTP \(http.statusCode) for \(normalized)."]
             )
@@ -498,7 +533,7 @@ final class ConfigStore: ObservableObject {
               let fullName = json["full_name"] as? String
         else {
             throw NSError(
-                domain: "ReNuvio",
+                domain: "Renewio",
                 code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Could not read repository metadata."]
             )
@@ -520,7 +555,7 @@ final class ConfigStore: ObservableObject {
               let url = URL(string: "https://api.github.com/repos/\(encoded)/releases?per_page=10")
         else {
             throw NSError(
-                domain: "ReNuvio",
+                domain: "Renewio",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Paste a GitHub HTTPS clone link or owner/repo."]
             )
@@ -528,13 +563,13 @@ final class ConfigStore: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("ReNuvio", forHTTPHeaderField: "User-Agent")
+        request.setValue("Renewio", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw NSError(
-                domain: "ReNuvio",
+                domain: "Renewio",
                 code: http.statusCode,
                 userInfo: [NSLocalizedDescriptionKey: "GitHub returned HTTP \(http.statusCode)."]
             )

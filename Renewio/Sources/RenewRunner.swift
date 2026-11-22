@@ -45,7 +45,7 @@ final class RenewRunner: ObservableObject {
 
     init() {
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Logs/ReNuvio", isDirectory: true)
+            .appendingPathComponent("Logs/Renewio", isDirectory: true)
         try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         logURL = logs.appendingPathComponent("renew-ui.log")
     }
@@ -91,7 +91,7 @@ final class RenewRunner: ObservableObject {
         guard let scriptURL = Self.resolveScriptURL() else {
             status = .failure(
                 stage: "init",
-                message: "renew-nuvio.sh was not found inside the app bundle. Rebuild ReNuvio."
+                message: "renewio.sh was not found inside the app bundle. Rebuild Renewio."
             )
             activeInstallID = nil
             return
@@ -116,11 +116,11 @@ final class RenewRunner: ObservableObject {
 
         var env = ProcessInfo.processInfo.environment
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!.appendingPathComponent("ReNuvio")
+            .first!.appendingPathComponent("Renewio")
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
-            .first!.appendingPathComponent("Logs/ReNuvio")
-        env["RENUVIO_SUPPORT_DIR"] = support.path
-        env["RENUVIO_LOG_DIR"] = logs.path
+            .first!.appendingPathComponent("Logs/Renewio")
+        env["RENEWIO_SUPPORT_DIR"] = support.path
+        env["RENEWIO_LOG_DIR"] = logs.path
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
         process.environment = env
 
@@ -213,7 +213,7 @@ final class RenewRunner: ObservableObject {
                 let stageID = parts.first ?? "unknown"
                 let message = parts.count > 1 ? parts[1] : payload
                 status = .failure(stage: stageID, message: message)
-                notify(title: "ReNuvio failed", body: message)
+                notify(title: "Renewio failed", body: message)
                 queue = []
             } else if line.hasPrefix("[RESULT] ") {
                 let payload = String(line.dropFirst("[RESULT] ".count))
@@ -283,7 +283,7 @@ final class RenewRunner: ObservableObject {
             let detail = Self.latestErrorFromLog()
                 ?? "Renew exited with code \(code)."
             self.status = .failure(stage: "unknown", message: detail)
-            notify(title: "ReNuvio failed", body: detail)
+            notify(title: "Renewio failed", body: detail)
             queue = []
             activeInstallID = nil
         }
@@ -305,12 +305,12 @@ final class RenewRunner: ObservableObject {
 
     private static var supportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("ReNuvio", isDirectory: true)
+            .appendingPathComponent("Renewio", isDirectory: true)
     }
 
     private static var renewLogURL: URL {
         FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Logs/ReNuvio/renew.log")
+            .appendingPathComponent("Logs/Renewio/renew.log")
     }
 
     private static func latestStructuredLine() -> String? {
@@ -371,25 +371,25 @@ final class RenewRunner: ObservableObject {
     }
 
     static func resolveScriptURL() -> URL? {
-        if let bundled = Bundle.main.url(forResource: "renew-nuvio", withExtension: "sh") {
+        if let bundled = Bundle.main.url(forResource: "renewio", withExtension: "sh") {
             return bundled
         }
         let candidates = [
             Bundle.main.bundleURL
                 .deletingLastPathComponent()
-                .appendingPathComponent("scripts/renew-nuvio.sh"),
+                .appendingPathComponent("scripts/renewio.sh"),
             URL(fileURLWithPath: #file)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("scripts/renew-nuvio.sh"),
+                .appendingPathComponent("scripts/renewio.sh"),
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) || FileManager.default.fileExists(atPath: $0.path) }
     }
 
     static var logDirectoryURL: URL {
         FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Logs/ReNuvio", isDirectory: true)
+            .appendingPathComponent("Logs/Renewio", isDirectory: true)
     }
 
     static func recentErrorLogExcerpt(maxLines: Int = 20) -> String {

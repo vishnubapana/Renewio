@@ -27,7 +27,7 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().overlay(ReNuvioTheme.border)
+            Divider().overlay(RenewioTheme.border)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 14) {
                     if !xcodeOK || (!sdks.tvOS && !sdks.iOS) {
@@ -43,7 +43,7 @@ struct OnboardingView: View {
                 .padding(16)
             }
             .frame(height: 540)
-            Divider().overlay(ReNuvioTheme.border)
+            Divider().overlay(RenewioTheme.border)
             footer
         }
         .onAppear(perform: bootstrap)
@@ -57,18 +57,18 @@ struct OnboardingView: View {
                 systemImage: "chevron.left",
                 iconSize: 13,
                 iconWeight: .bold,
-                hoverTint: ReNuvioTheme.accent,
-                helpText: "Back to ReNuvio",
+                hoverTint: RenewioTheme.accent,
+                helpText: "Back to Renewio",
                 action: { model.handleSetupClosed() }
             )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Settings")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(ReNuvioTheme.foreground)
+                    .foregroundStyle(RenewioTheme.foreground)
                 Text("Devices, apps & GitHub sources")
                     .font(.system(size: 11))
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
             }
 
             Spacer(minLength: 6)
@@ -90,7 +90,7 @@ struct OnboardingView: View {
                 .buttonStyle(SecondaryButtonStyle())
         }
         .padding(12)
-        .background(CardSurface(fill: ReNuvioTheme.accent.opacity(0.08), border: ReNuvioTheme.accent.opacity(0.3)))
+        .background(CardSurface(fill: RenewioTheme.accent.opacity(0.08), border: RenewioTheme.accent.opacity(0.3)))
     }
 
     // MARK: - Devices
@@ -110,16 +110,16 @@ struct OnboardingView: View {
                     ProgressView().controlSize(.small)
                     Text("Scanning for paired devices…")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                 }
             } else if draftDevices.isEmpty && discovered.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No paired devices detected")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ReNuvioTheme.foreground)
+                        .foregroundStyle(RenewioTheme.foreground)
                     Text("Pair an Apple TV, iPhone, or iPad in Xcode → Window → Devices and Simulators, then Refresh.")
                         .font(.system(size: 11))
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Open Xcode Devices") { DeviceDiscovery.openXcodeDevices() }
                         .buttonStyle(SecondaryButtonStyle())
@@ -142,7 +142,7 @@ struct OnboardingView: View {
                     if !untracked.isEmpty {
                         Text("Discovered — tap to add")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(ReNuvioTheme.mutedForeground)
+                            .foregroundStyle(RenewioTheme.mutedForeground)
                             .padding(.top, 4)
                         ForEach(untracked) { device in
                             Button {
@@ -150,20 +150,20 @@ struct OnboardingView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: device.platform.systemImage)
-                                        .foregroundStyle(ReNuvioTheme.accent)
+                                        .foregroundStyle(RenewioTheme.accent)
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(device.name)
                                             .font(.system(size: 12, weight: .medium))
-                                            .foregroundStyle(ReNuvioTheme.foreground)
+                                            .foregroundStyle(RenewioTheme.foreground)
                                         Text(device.displaySubtitle)
                                             .font(.system(size: 10, design: .monospaced))
-                                            .foregroundStyle(ReNuvioTheme.mutedForeground)
+                                            .foregroundStyle(RenewioTheme.mutedForeground)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                     }
                                     Spacer()
                                     Image(systemName: "plus.circle")
-                                        .foregroundStyle(ReNuvioTheme.accent)
+                                        .foregroundStyle(RenewioTheme.accent)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -185,7 +185,7 @@ struct OnboardingView: View {
                         Text("Enter device manually")
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
                 }
                 .buttonStyle(.plain)
 
@@ -198,9 +198,9 @@ struct OnboardingView: View {
                         }
                         .pickerStyle(.segmented)
                         TextField("Device name", text: $manualName)
-                            .textFieldStyle(ReNuvioTextFieldStyle())
+                            .textFieldStyle(RenewioTextFieldStyle())
                         TextField("Device UDID", text: $manualID)
-                            .textFieldStyle(ReNuvioTextFieldStyle(monospaced: true))
+                            .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
                         Button("Add manual device") {
                             let id = manualID.trimmingCharacters(in: .whitespacesAndNewlines)
                             let name = manualName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -235,11 +235,11 @@ struct OnboardingView: View {
             if selectedDeviceID == nil {
                 Text("Select a device to manage its apps.")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
             } else if installsForSelected.isEmpty && editingInstall == nil && !isAddingNewApp {
                 Text("No apps yet. Tap Add app and paste a GitHub HTTPS clone link.")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
             } else if !isAddingNewApp || isRepoVerified {
                 VStack(spacing: 6) {
                     ForEach(installsForSelected.filter { editingInstall?.id != $0.id }) { install in
@@ -247,10 +247,10 @@ struct OnboardingView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(install.name)
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(ReNuvioTheme.foreground)
+                                    .foregroundStyle(RenewioTheme.foreground)
                                 Text("\(install.githubRepo) · \(install.bundleID)")
                                     .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                                    .foregroundStyle(RenewioTheme.mutedForeground)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             }
@@ -260,7 +260,7 @@ struct OnboardingView: View {
                             } label: {
                                 Text("Edit")
                                     .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(ReNuvioTheme.accent)
+                                    .foregroundStyle(RenewioTheme.accent)
                             }
                             .buttonStyle(.plain)
                         }
@@ -288,13 +288,13 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Add app")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ReNuvioTheme.foreground)
+                .foregroundStyle(RenewioTheme.foreground)
             Text("Paste the GitHub HTTPS clone link to verify the repo.")
                 .font(.system(size: 11))
-                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                .foregroundStyle(RenewioTheme.mutedForeground)
 
             TextField("https://github.com/owner/repo.git", text: $sourceDraftURL)
-                .textFieldStyle(ReNuvioTextFieldStyle(monospaced: true))
+                .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
                 .onSubmit {
                     Task { await verifyAndResolveSource() }
                 }
@@ -323,7 +323,7 @@ struct OnboardingView: View {
             }
         }
         .padding(10)
-        .background(CardSurface(fill: ReNuvioTheme.accent.opacity(0.06), border: ReNuvioTheme.accent.opacity(0.25)))
+        .background(CardSurface(fill: RenewioTheme.accent.opacity(0.06), border: RenewioTheme.accent.opacity(0.25)))
     }
 
     private func appEditor(_ install: TrackedAppInstall) -> some View {
@@ -331,25 +331,25 @@ struct OnboardingView: View {
             HStack {
                 Text(isAddingNewApp ? "New app" : "Edit app")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ReNuvioTheme.foreground)
+                    .foregroundStyle(RenewioTheme.foreground)
                 Spacer()
                 Text(install.githubRepo)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
 
             labeledField("Name") {
                 TextField("App name", text: binding(\.name, in: install))
-                    .textFieldStyle(ReNuvioTextFieldStyle())
+                    .textFieldStyle(RenewioTextFieldStyle())
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("VERSION")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                     Spacer()
                     InlineActionLink(
                         title: isScanningReleases ? "Scanning…" : "Scan",
@@ -382,8 +382,8 @@ struct OnboardingView: View {
 
             labeledField("Bundle ID") {
                 HStack(spacing: 8) {
-                    TextField("com.renuvio.app", text: binding(\.bundleID, in: install))
-                        .textFieldStyle(ReNuvioTextFieldStyle(monospaced: true))
+                    TextField("com.renewio.app", text: binding(\.bundleID, in: install))
+                        .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
                     InlineActionLink(title: "Suggest", systemImage: "sparkles") {
                         let team = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
                         let name = editingInstall?.name ?? install.name
@@ -413,7 +413,7 @@ struct OnboardingView: View {
             }
         }
         .padding(10)
-        .background(CardSurface(fill: ReNuvioTheme.accent.opacity(0.06), border: ReNuvioTheme.accent.opacity(0.25)))
+        .background(CardSurface(fill: RenewioTheme.accent.opacity(0.06), border: RenewioTheme.accent.opacity(0.25)))
     }
 
     private func beginAddApp() {
@@ -458,10 +458,10 @@ struct OnboardingView: View {
             }
         } content: {
             TextField("e.g. 52L6R8UQZU", text: $teamID)
-                .textFieldStyle(ReNuvioTextFieldStyle(monospaced: true))
+                .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
             Text("Shared across all devices and apps. Apple ID stays in Xcode.")
                 .font(.system(size: 10.5))
-                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                .foregroundStyle(RenewioTheme.mutedForeground)
         }
     }
 
@@ -488,7 +488,7 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(ReNuvioTheme.backgroundAlt.opacity(0.9))
+        .background(RenewioTheme.backgroundAlt.opacity(0.9))
     }
 
     private var canSave: Bool {
@@ -614,7 +614,7 @@ struct OnboardingView: View {
             edited.name = friendlyAppName(fromRepo: normalized)
         }
         guard edited.bundleID.contains(".") else {
-            errorMessage = "App needs a Bundle ID like com.renuvio.app."
+            errorMessage = "App needs a Bundle ID like com.renewio.app."
             return
         }
         if let idx = draftInstalls.firstIndex(where: { $0.id == edited.id }) {
@@ -679,7 +679,7 @@ struct OnboardingView: View {
             return
         }
 
-        let config = ReNuvioConfig(
+        let config = RenewioConfig(
             teamID: trimmedTeam,
             devices: draftDevices,
             installs: draftInstalls,
@@ -701,7 +701,7 @@ struct OnboardingView: View {
             .replacingOccurrences(of: " ", with: "")
             .filter { $0.isLetter || $0.isNumber }
         let base = appSlug.isEmpty ? "app" : appSlug
-        return "com.renuvio.\(teamSlug).\(base)"
+        return "com.renewio.\(teamSlug).\(base)"
     }
 
     private func binding(
@@ -721,7 +721,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                .foregroundStyle(RenewioTheme.mutedForeground)
             content()
         }
     }
@@ -730,29 +730,29 @@ struct OnboardingView: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(ReNuvioTheme.danger)
+                .foregroundStyle(RenewioTheme.danger)
             Text(message)
                 .font(.system(size: 11.5))
-                .foregroundStyle(ReNuvioTheme.foreground)
+                .foregroundStyle(RenewioTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CardSurface(fill: ReNuvioTheme.danger.opacity(0.12), border: ReNuvioTheme.danger.opacity(0.35), cornerRadius: 10))
+        .background(CardSurface(fill: RenewioTheme.danger.opacity(0.12), border: RenewioTheme.danger.opacity(0.35), cornerRadius: 10))
     }
 
     private func checklistRow(ok: Bool, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(ok ? ReNuvioTheme.success : ReNuvioTheme.accent)
+                .foregroundStyle(ok ? RenewioTheme.success : RenewioTheme.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ReNuvioTheme.foreground)
+                    .foregroundStyle(RenewioTheme.foreground)
                 Text(detail)
                     .font(.system(size: 11))
-                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                    .foregroundStyle(RenewioTheme.mutedForeground)
             }
         }
     }
@@ -769,30 +769,30 @@ private struct XcodeStatusButton: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(ready ? ReNuvioTheme.success : ReNuvioTheme.accent)
+                    .fill(ready ? RenewioTheme.success : RenewioTheme.accent)
                     .frame(width: 6, height: 6)
-                    .shadow(color: (ready ? ReNuvioTheme.success : ReNuvioTheme.accent).opacity(0.6), radius: 4)
+                    .shadow(color: (ready ? RenewioTheme.success : RenewioTheme.accent).opacity(0.6), radius: 4)
                 Text(ready ? "Xcode OK" : "Xcode")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(
                         isHovered
-                            ? ReNuvioTheme.foreground
-                            : (ready ? ReNuvioTheme.mutedForeground : ReNuvioTheme.accent)
+                            ? RenewioTheme.foreground
+                            : (ready ? RenewioTheme.mutedForeground : RenewioTheme.accent)
                     )
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundStyle(isHovered ? ReNuvioTheme.accent : ReNuvioTheme.mutedForeground.opacity(0.7))
+                    .foregroundStyle(isHovered ? RenewioTheme.accent : RenewioTheme.mutedForeground.opacity(0.7))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(isHovered ? ReNuvioTheme.accent.opacity(0.12) : Color.white.opacity(0.04))
+            .background(isHovered ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.04))
             .clipShape(Capsule())
             .overlay(
                 Capsule()
                     .stroke(
                         isHovered
-                            ? ReNuvioTheme.accent.opacity(0.45)
-                            : (ready ? ReNuvioTheme.border : ReNuvioTheme.accent.opacity(0.35)),
+                            ? RenewioTheme.accent.opacity(0.45)
+                            : (ready ? RenewioTheme.border : RenewioTheme.accent.opacity(0.35)),
                         lineWidth: 1
                     )
             )

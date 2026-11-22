@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B10000000000000000000001 /* ReNuvioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* ReNuvioApp.swift */; };
+		B10000000000000000000001 /* RenewioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* RenewioApp.swift */; };
 		B10000000000000000000002 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppModel.swift */; };
 		B10000000000000000000003 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* ConfigStore.swift */; };
 		B10000000000000000000004 /* DeviceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* DeviceDiscovery.swift */; };
@@ -16,14 +16,14 @@
 		B10000000000000000000007 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* OnboardingView.swift */; };
 		B10000000000000000000008 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* Theme.swift */; };
 		B1000000000000000000000C /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
-		B10000000000000000000009 /* renew-nuvio.sh in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* renew-nuvio.sh */; };
+		B10000000000000000000009 /* renewio.sh in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* renewio.sh */; };
 		B1000000000000000000000A /* ProvisioningStub in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* ProvisioningStub */; };
 		B1000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* Assets.xcassets */; };
 		B1000000000000000000000E /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* AppIcon.icns */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B20000000000000000000001 /* ReNuvioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReNuvioApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000001 /* RenewioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenewioApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		B20000000000000000000004 /* DeviceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiscovery.swift; sourceTree = "<group>"; };
@@ -32,12 +32,12 @@
 		B20000000000000000000007 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		B2000000000000000000000C /* ExpiryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpiryNotifier.swift; sourceTree = "<group>"; };
-		B20000000000000000000009 /* renew-nuvio.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "renew-nuvio.sh"; sourceTree = "<group>"; };
+		B20000000000000000000009 /* renewio.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "renewio.sh"; sourceTree = "<group>"; };
 		B2000000000000000000000A /* ProvisioningStub */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ProvisioningStub; sourceTree = "<group>"; };
 		B2000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B2000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B2000000000000000000000E /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
-		B30000000000000000000001 /* ReNuvio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReNuvio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000001 /* Renewio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Renewio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,7 +63,7 @@
 		B50000000000000000000002 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				B20000000000000000000001 /* ReNuvioApp.swift */,
+				B20000000000000000000001 /* RenewioApp.swift */,
 				B20000000000000000000002 /* AppModel.swift */,
 				B20000000000000000000003 /* ConfigStore.swift */,
 				B20000000000000000000004 /* DeviceDiscovery.swift */,
@@ -82,7 +82,7 @@
 				B2000000000000000000000B /* Info.plist */,
 				B2000000000000000000000D /* Assets.xcassets */,
 				B2000000000000000000000E /* AppIcon.icns */,
-				B20000000000000000000009 /* renew-nuvio.sh */,
+				B20000000000000000000009 /* renewio.sh */,
 				B2000000000000000000000A /* ProvisioningStub */,
 			);
 			path = Resources;
@@ -91,7 +91,7 @@
 		B50000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				B30000000000000000000001 /* ReNuvio.app */,
+				B30000000000000000000001 /* Renewio.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -99,9 +99,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		B60000000000000000000001 /* ReNuvio */ = {
+		B60000000000000000000001 /* Renewio */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B70000000000000000000003 /* Build configuration list for PBXNativeTarget "ReNuvio" */;
+			buildConfigurationList = B70000000000000000000003 /* Build configuration list for PBXNativeTarget "Renewio" */;
 			buildPhases = (
 				B80000000000000000000001 /* Sources */,
 				B40000000000000000000001 /* Frameworks */,
@@ -112,9 +112,9 @@
 			);
 			dependencies = (
 			);
-			name = ReNuvio;
-			productName = ReNuvio;
-			productReference = B30000000000000000000001 /* ReNuvio.app */;
+			name = Renewio;
+			productName = Renewio;
+			productReference = B30000000000000000000001 /* Renewio.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -132,7 +132,7 @@
 					};
 				};
 			};
-			buildConfigurationList = B70000000000000000000001 /* Build configuration list for PBXProject "ReNuvio" */;
+			buildConfigurationList = B70000000000000000000001 /* Build configuration list for PBXProject "Renewio" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -145,7 +145,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				B60000000000000000000001 /* ReNuvio */,
+				B60000000000000000000001 /* Renewio */,
 			);
 		};
 /* End PBXProject section */
@@ -155,7 +155,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000009 /* renew-nuvio.sh in Resources */,
+				B10000000000000000000009 /* renewio.sh in Resources */,
 				B1000000000000000000000A /* ProvisioningStub in Resources */,
 				B1000000000000000000000D /* Assets.xcassets in Resources */,
 				B1000000000000000000000E /* AppIcon.icns in Resources */,
@@ -182,7 +182,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "chmod +x \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/renew-nuvio.sh\" || true\n";
+			shellScript = "chmod +x \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/renewio.sh\" || true\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -191,7 +191,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B10000000000000000000001 /* ReNuvioApp.swift in Sources */,
+				B10000000000000000000001 /* RenewioApp.swift in Sources */,
 				B10000000000000000000002 /* AppModel.swift in Sources */,
 				B10000000000000000000003 /* ConfigStore.swift in Sources */,
 				B10000000000000000000004 /* DeviceDiscovery.swift in Sources */,
@@ -254,7 +254,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.renuvio.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.renewio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -279,7 +279,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.renuvio.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.renewio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -290,7 +290,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B70000000000000000000001 /* Build configuration list for PBXProject "ReNuvio" */ = {
+		B70000000000000000000001 /* Build configuration list for PBXProject "Renewio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B70000000000000000000011 /* Debug */,
@@ -299,7 +299,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B70000000000000000000003 /* Build configuration list for PBXNativeTarget "ReNuvio" */ = {
+		B70000000000000000000003 /* Build configuration list for PBXNativeTarget "Renewio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B70000000000000000000021 /* Debug */,

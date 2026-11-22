@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build ReNuvio.app, install to /Applications, and optionally make a shareable DMG.
+# Build Renewio.app, install to /Applications, and optionally make a shareable DMG.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="ReNuvio"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/ReNuvio/Resources/Info.plist" 2>/dev/null || echo "1.0.0")"
+APP_NAME="Renewio"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Renewio/Resources/Info.plist" 2>/dev/null || echo "1.0.0")"
 DIST_APP="$ROOT/dist/${APP_NAME}.app"
 INSTALL_APP="/Applications/${APP_NAME}.app"
 DMG_PATH="$ROOT/dist/${APP_NAME}-${VERSION}.dmg"
@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "==> Building ${APP_NAME}.app"
-"$ROOT/scripts/build-renuvio.sh"
+"$ROOT/scripts/build-renewio.sh"
 
 [[ -d "$DIST_APP" ]] || { echo "Missing $DIST_APP"; exit 1; }
 
@@ -43,11 +43,16 @@ xattr -cr "$DIST_APP" 2>/dev/null || true
 
 if [[ "$DO_INSTALL" == "1" ]]; then
   echo "==> Installing to ${INSTALL_APP}"
+  pkill -x "$APP_NAME" 2>/dev/null || true
+  pkill -x ReNuvio 2>/dev/null || true
+  sleep 0.3
   if [[ -d "$INSTALL_APP" ]]; then
-    # Prefer quit if running
-    pkill -x "$APP_NAME" 2>/dev/null || true
-    sleep 0.3
     rm -rf "$INSTALL_APP"
+  fi
+  # Remove the previous product name if still present.
+  if [[ -d "/Applications/ReNuvio.app" ]]; then
+    rm -rf "/Applications/ReNuvio.app"
+    echo "Removed old /Applications/ReNuvio.app"
   fi
   cp -R "$DIST_APP" "$INSTALL_APP"
   codesign --force --deep --sign - "$INSTALL_APP"

@@ -32,9 +32,9 @@ struct MenuPopoverView: View {
     private var topBar: some View {
         HStack(alignment: .center, spacing: 10) {
             if devices.isEmpty {
-                Text("ReNuvio")
+                Text("Renewio")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(ReNuvioTheme.foreground)
+                    .foregroundStyle(RenewioTheme.foreground)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -57,7 +57,7 @@ struct MenuPopoverView: View {
                     systemImage: "gearshape.fill",
                     iconSize: 14,
                     iconWeight: .semibold,
-                    hoverTint: ReNuvioTheme.accent,
+                    hoverTint: RenewioTheme.accent,
                     helpText: "Settings",
                     action: { model.openOnboarding() }
                 )
@@ -65,8 +65,8 @@ struct MenuPopoverView: View {
                     systemImage: "xmark",
                     iconSize: 12,
                     iconWeight: .bold,
-                    hoverTint: ReNuvioTheme.danger,
-                    helpText: "Quit ReNuvio",
+                    hoverTint: RenewioTheme.danger,
+                    helpText: "Quit Renewio",
                     action: { NSApp.terminate(nil) }
                 )
             }
@@ -77,10 +77,10 @@ struct MenuPopoverView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Setup needed")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(ReNuvioTheme.accent)
+                .foregroundStyle(RenewioTheme.accent)
             Text("Add an Xcode Team ID, a paired device, and at least one app in Settings.")
                 .font(.system(size: 12))
-                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                .foregroundStyle(RenewioTheme.mutedForeground)
             Button("Open Settings") { model.openOnboarding() }
                 .buttonStyle(PrimaryButtonStyle())
         }
@@ -93,10 +93,10 @@ struct MenuPopoverView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("No apps on this device")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(ReNuvioTheme.foreground)
+                .foregroundStyle(RenewioTheme.foreground)
             Text("Add a GitHub-sourced app in Settings to track and renew it here.")
                 .font(.system(size: 12))
-                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                .foregroundStyle(RenewioTheme.mutedForeground)
             Button("Add app in Settings") { model.openOnboarding() }
                 .buttonStyle(SecondaryButtonStyle())
         }
@@ -165,16 +165,16 @@ private struct DevicePill: View {
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
             }
-            .foregroundStyle(isSelected ? ReNuvioTheme.accentForeground : ReNuvioTheme.accent)
+            .foregroundStyle(isSelected ? RenewioTheme.accentForeground : RenewioTheme.accent)
             .padding(.horizontal, isSelected ? 10 : 0)
             .frame(width: isSelected ? nil : 32, height: 32)
             .background(
                 Capsule()
-                    .fill(isSelected ? ReNuvioTheme.accent : Color.clear)
+                    .fill(isSelected ? RenewioTheme.accent : Color.clear)
             )
             .overlay(
                 Capsule()
-                    .stroke(ReNuvioTheme.accent, lineWidth: isSelected ? 0 : 1.5)
+                    .stroke(RenewioTheme.accent, lineWidth: isSelected ? 0 : 1.5)
             )
         }
         .buttonStyle(.plain)
@@ -204,12 +204,12 @@ private struct AppInstallCard: View {
                         HStack(spacing: 6) {
                             Text(install.name)
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(ReNuvioTheme.foreground)
+                                .foregroundStyle(RenewioTheme.foreground)
                                 .lineLimit(1)
                             if let version = install.displayVersion {
                                 Text(version)
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                                    .foregroundStyle(RenewioTheme.mutedForeground)
                             }
                             Spacer(minLength: 0)
                         }
@@ -224,11 +224,11 @@ private struct AppInstallCard: View {
                                 .foregroundStyle(state.tint)
                             Text(state.countdownText)
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(ReNuvioTheme.foreground)
+                                .foregroundStyle(RenewioTheme.foreground)
                             if let meta = state.rightMeta {
                                 Text("· \(meta)")
                                     .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(ReNuvioTheme.mutedForeground)
+                                    .foregroundStyle(RenewioTheme.mutedForeground)
                             }
                             Spacer(minLength: 0)
                         }
@@ -246,7 +246,7 @@ private struct AppInstallCard: View {
                         } else if let tag = install.selectedTag, !tag.isEmpty {
                             Text("Pinned \(tag)")
                                 .font(.system(size: 9.5, design: .monospaced))
-                                .foregroundStyle(ReNuvioTheme.accent)
+                                .foregroundStyle(RenewioTheme.accent)
                                 .lineLimit(1)
                         }
                     }
@@ -277,37 +277,37 @@ private struct AppInstallCard: View {
                     ProgressView(value: progressValue(for: stage)) {
                         Text(detail)
                             .font(.system(size: 11))
-                            .foregroundStyle(ReNuvioTheme.mutedForeground)
+                            .foregroundStyle(RenewioTheme.mutedForeground)
                     }
                     .progressViewStyle(.linear)
-                    .tint(ReNuvioTheme.accent)
+                    .tint(RenewioTheme.accent)
                 }
             case let .success(version, deviceName, detail, _, _):
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Success", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ReNuvioTheme.success)
+                        .foregroundStyle(RenewioTheme.success)
                     Text("\(version) on \(deviceName)")
                         .font(.system(size: 11))
-                        .foregroundStyle(ReNuvioTheme.foreground)
+                        .foregroundStyle(RenewioTheme.foreground)
                     Text(detail)
                         .font(.system(size: 10))
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                 }
             case let .failure(_, message):
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Failed", systemImage: "xmark.octagon.fill")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ReNuvioTheme.danger)
+                        .foregroundStyle(RenewioTheme.danger)
                     Text(message)
                         .font(.system(size: 11))
-                        .foregroundStyle(ReNuvioTheme.foreground)
+                        .foregroundStyle(RenewioTheme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                     if !errorLog.isEmpty {
                         ScrollView {
                             Text(errorLog)
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(ReNuvioTheme.mutedForeground)
+                                .foregroundStyle(RenewioTheme.mutedForeground)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                         }
@@ -323,7 +323,7 @@ private struct AppInstallCard: View {
                                 .font(.system(size: 10.5, weight: .medium))
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(ReNuvioTheme.mutedForeground)
+                        .foregroundStyle(RenewioTheme.mutedForeground)
                     }
                 }
             case .idle:
@@ -358,21 +358,21 @@ private struct RenewIconButton: View {
                 if isRunning {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(ReNuvioTheme.accentForeground)
+                        .tint(RenewioTheme.accentForeground)
                 } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ReNuvioTheme.accentForeground)
+                        .foregroundStyle(RenewioTheme.accentForeground)
                         .rotationEffect(.degrees(isHovered ? 180 : 0))
                 }
             }
             .frame(width: 32, height: 32)
             .background(
-                ReNuvioTheme.accent.opacity(disabled && !isRunning ? 0.4 : (isHovered ? 1 : 0.92))
+                RenewioTheme.accent.opacity(disabled && !isRunning ? 0.4 : (isHovered ? 1 : 0.92))
             )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .shadow(
-                color: disabled ? .clear : ReNuvioTheme.accent.opacity(isHovered ? 0.45 : 0.25),
+                color: disabled ? .clear : RenewioTheme.accent.opacity(isHovered ? 0.45 : 0.25),
                 radius: isHovered ? 8 : 4
             )
         }
@@ -421,7 +421,7 @@ struct RefreshCountdownState {
                 countdownSuffix: "Ready",
                 rightMeta: nil,
                 progress: 0,
-                tint: ReNuvioTheme.mutedForeground,
+                tint: RenewioTheme.mutedForeground,
                 showProgressBar: false
             )
         }
@@ -434,7 +434,7 @@ struct RefreshCountdownState {
                 countdownSuffix: "refresh needed",
                 rightMeta: formattedShortDate(expiresAt),
                 progress: 0,
-                tint: ReNuvioTheme.danger,
+                tint: RenewioTheme.danger,
                 showProgressBar: true
             )
         }
@@ -459,7 +459,7 @@ struct RefreshCountdownState {
             countdownSuffix: "until refresh",
             rightMeta: formattedShortDate(expiresAt),
             progress: fraction,
-            tint: renewSoon ? ReNuvioTheme.accent : ReNuvioTheme.success,
+            tint: renewSoon ? RenewioTheme.accent : RenewioTheme.success,
             showProgressBar: true
         )
     }

@@ -4,7 +4,7 @@ import SwiftUI
 struct ProvisioningStubApp: App {
     var body: some Scene {
         WindowGroup {
-            Text("ReNuvio Provisioning Stub")
+            Text("Renewio Provisioning Stub")
                 .font(.headline)
         }
     }
