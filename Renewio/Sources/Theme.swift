@@ -5,9 +5,6 @@ enum RenewioTheme {
     static let backgroundAlt = Color(red: 18 / 255, green: 18 / 255, blue: 26 / 255) // #12121A
     static let card = Color(red: 26 / 255, green: 26 / 255, blue: 36 / 255).opacity(0.6)
     static let cardSolid = Color(red: 26 / 255, green: 26 / 255, blue: 36 / 255)
-    /// Opaque stand-in for `CardSurface()` (cardSolid @ 0.75) composited over `background`.
-    /// Use under nested translucent rows (e.g. slide-to-reveal) so they match SectionCard insets.
-    static let sectionInset = Color(red: 22 / 255, green: 22 / 255, blue: 31 / 255)
     static let foreground = Color(red: 250 / 255, green: 250 / 255, blue: 250 / 255)
     static let mutedForeground = Color(red: 113 / 255, green: 113 / 255, blue: 122 / 255)
     static let accent = Color(red: 245 / 255, green: 158 / 255, blue: 11 / 255) // #F59E0B

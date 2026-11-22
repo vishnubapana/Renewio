@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     @Published var availableVersions: [ReleaseOption] = []
     @Published var editingInstallID: UUID?
     @Published var pendingLocalIPAURL: URL?
+    /// When true, Settings opens already in the Add app flow for the selected device.
+    @Published var pendingAddApp = false
     /// Latest available GitHub release when newer than `lastInstalledVersion`.
     @Published var availableUpdates: [UUID: ReleaseOption] = [:]
     /// Simple published icon for MenuBarExtra — avoid TimelineView in the label (it often fails to render).
@@ -121,6 +123,17 @@ final class AppModel: ObservableObject {
 
     func openOnboarding(editingInstallID: UUID? = nil) {
         self.editingInstallID = editingInstallID
+        pendingAddApp = false
+        withAnimation(RenewioMotion.transition) {
+            showOnboarding = true
+        }
+    }
+
+    /// Opens Settings with the Add app panel expanded for the currently selected device.
+    func openOnboardingForAddApp() {
+        editingInstallID = nil
+        pendingLocalIPAURL = nil
+        pendingAddApp = true
         withAnimation(RenewioMotion.transition) {
             showOnboarding = true
         }
@@ -129,6 +142,7 @@ final class AppModel: ObservableObject {
     func openOnboardingWithLocalIPA(_ url: URL) {
         pendingLocalIPAURL = url
         editingInstallID = nil
+        pendingAddApp = false
         withAnimation(RenewioMotion.transition) {
             showOnboarding = true
         }
@@ -137,6 +151,7 @@ final class AppModel: ObservableObject {
     func handleSetupClosed() {
         editingInstallID = nil
         pendingLocalIPAURL = nil
+        pendingAddApp = false
         withAnimation(RenewioMotion.transition) {
             showOnboarding = false
         }

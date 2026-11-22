@@ -50,12 +50,24 @@ struct MenuPopoverView: View {
                             }
                         }
                     }
+                    // Leave room for pill stroke / focus ring so icons aren’t clipped.
+                    .padding(.vertical, 2)
                 }
             }
 
             Spacer(minLength: 4)
 
             HStack(spacing: 4) {
+                if !model.configStore.needsOnboarding, model.selectedDevice != nil {
+                    PopoverIconButton(
+                        systemImage: "plus",
+                        iconSize: 11,
+                        iconWeight: .bold,
+                        hoverTint: RenewioTheme.accent,
+                        helpText: "Add app",
+                        action: { model.openOnboardingForAddApp() }
+                    )
+                }
                 PopoverIconButton(
                     systemImage: "gearshape.fill",
                     iconSize: 11,
@@ -92,15 +104,30 @@ struct MenuPopoverView: View {
     }
 
     private var emptyAppsPrompt: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("No apps on this device")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(RenewioTheme.foreground)
-            Text("Add a GitHub repo or drop a local .ipa in Settings to track and renew it here.")
-                .font(.system(size: 12))
-                .foregroundStyle(RenewioTheme.mutedForeground)
-            Button("Add app in Settings") { model.openOnboarding() }
-                .buttonStyle(SecondaryButtonStyle())
+
+            HStack(alignment: .top, spacing: 6) {
+                Text("Tap")
+                    .font(.system(size: 12))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(RenewioTheme.accent)
+                    .frame(width: 16, height: 16)
+                    .background(Color.white.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusSm, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: RenewioTheme.radiusSm, style: .continuous)
+                            .stroke(RenewioTheme.border, lineWidth: 1)
+                    )
+                Text("above to add a GitHub repo or local .ipa.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,16 +253,22 @@ private struct DevicePill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: isSelected ? 4 : 0) {
                 Image(systemName: device.platform.systemImage)
                     .font(.system(size: 9, weight: .semibold))
+                // Keep the label mounted and clip its width so the pill expands/
+                // collapses smoothly without insert/remove opacity ghosting.
                 Text(device.name)
                     .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: isSelected ? 160 : 0, alignment: .leading)
+                    .clipped()
             }
             .foregroundStyle(isSelected ? RenewioTheme.accentForeground : RenewioTheme.accent)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, isSelected ? 8 : 6)
             .frame(height: pillHeight)
+            .frame(minWidth: pillHeight)
             .background(
                 Capsule()
                     .fill(
@@ -246,7 +279,7 @@ private struct DevicePill: View {
             )
             .overlay(
                 Capsule()
-                    .stroke(
+                    .strokeBorder(
                         RenewioTheme.accent.opacity(isSelected ? 0 : ((isHovered || isFocused) ? 1 : 0.85)),
                         lineWidth: isSelected ? 0 : 1.25
                     )
@@ -255,12 +288,14 @@ private struct DevicePill: View {
                 color: RenewioTheme.accent.opacity(isFocused && !isSelected ? 0.25 : 0),
                 radius: isFocused ? 6 : 0
             )
+            .animation(RenewioMotion.hover, value: isSelected)
+            .animation(RenewioMotion.hover, value: isHovered)
+            .animation(RenewioMotion.hover, value: isFocused)
         }
         .buttonStyle(RenewioPressButtonStyle())
         .help("\(device.name) · \(device.platform.displayName)")
         .focused($isFocused)
         .interactiveHover($isHovered)
-        .animation(RenewioMotion.hover, value: isSelected)
     }
 }
 
@@ -364,11 +399,9 @@ private struct AppInstallCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     if isCardHovered && !isRunningThis {
-                        PopoverIconButton(
-                            systemImage: "pencil",
-                            iconSize: 10,
-                            side: 24,
-                            hoverTint: RenewioTheme.accent,
+                        TrailingCircleIconButton(
+                            systemImage: "pencil.circle",
+                            tint: RenewioTheme.accent,
                             helpText: "Edit \(install.name)",
                             action: { model.openOnboarding(editingInstallID: install.id) }
                         )

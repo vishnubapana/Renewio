@@ -516,114 +516,103 @@ struct SelectableOptionRow: View {
     }
 }
 
-// MARK: - Hover Reveal Delete
+// MARK: - Trailing Circle Action
 
-private struct HoverRevealRowHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// Foreground content slides left on hover to reveal a trailing delete button.
-///
-/// The sliding layer sits on an opaque `sectionInset` base so translucent nested row
-/// fills (SelectableOptionRow / CardSurface) still match SectionCard styling without
-/// the delete control showing through. The delete control is a square matching the
-/// row’s measured height.
-struct HoverRevealDeleteRow<Content: View>: View {
-    var helpText: String = "Remove"
-    let onDelete: () -> Void
-    @ViewBuilder let content: () -> Content
-
-    @State private var isRowHovered = false
-    @State private var rowHeight: CGFloat = 36
-
-    private var revealSide: CGFloat { max(36, rowHeight) }
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            HoverRevealDeleteButton(
-                side: revealSide,
-                helpText: helpText,
-                action: onDelete
-            )
-
-            content()
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: HoverRevealRowHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
-                .background(
-                    RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
-                        .fill(RenewioTheme.sectionInset)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
-                .offset(x: isRowHovered ? -revealSide : 0)
-                .animation(RenewioMotion.hover, value: isRowHovered)
-        }
-        .onPreferenceChange(HoverRevealRowHeightKey.self) { height in
-            guard height > 1, abs(height - rowHeight) > 0.5 else { return }
-            rowHeight = height
-        }
-        .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
-        .interactiveHover($isRowHovered)
-    }
-}
-
-private struct HoverRevealDeleteButton: View {
-    let side: CGFloat
-    let helpText: String
+/// Shared glyph used for device add/remove and app edit (`plus.circle`, `xmark.circle`, `pencil.circle`).
+struct TrailingCircleIconButton: View {
+    let systemImage: String
+    var tint: Color = RenewioTheme.accent
+    var helpText: String = ""
     let action: () -> Void
 
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
 
-    private var cornerRadius: CGFloat { RenewioTheme.radiusSm }
-
     var body: some View {
         Button(action: action) {
-            Image(systemName: "trash")
-                .font(.system(size: max(11, side * 0.28), weight: .semibold))
+            Image(systemName: systemImage)
+                .font(.body)
                 .foregroundStyle(
-                    (isHovered || isFocused)
-                        ? Color.white
-                        : RenewioTheme.danger
-                )
-                .frame(width: side, height: side)
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            (isHovered || isFocused)
-                                ? RenewioTheme.danger.opacity(0.9)
-                                : RenewioTheme.danger.opacity(0.14)
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(
-                            RenewioTheme.danger.opacity((isHovered || isFocused) ? 0.85 : 0.35),
-                            lineWidth: 1
-                        )
-                )
-                .shadow(
-                    color: RenewioTheme.danger.opacity((isHovered || isFocused) ? 0.35 : 0),
-                    radius: (isHovered || isFocused) ? 8 : 0
+                    isHovered || isFocused
+                        ? tint
+                        : tint.opacity(0.85)
                 )
         }
         .buttonStyle(RenewioPressButtonStyle())
         .help(helpText)
-        .accessibilityLabel(helpText)
+        .accessibilityLabel(helpText.isEmpty ? systemImage : helpText)
         .focused($isFocused)
         .interactiveHover($isHovered)
         .animation(RenewioMotion.hover, value: isHovered)
         .animation(RenewioMotion.hover, value: isFocused)
-        .animation(RenewioMotion.hover, value: side)
-        .renewioFocusRing(isFocused: isFocused, cornerRadius: cornerRadius)
+    }
+}
+
+// MARK: - Device Tile
+
+/// Shared Settings device row for tracked (remove) and discovered (add) devices.
+struct DeviceTileRow: View {
+    let platformSystemImage: String
+    let title: String
+    let subtitle: String
+    var isSelected: Bool = false
+    let trailingSystemImage: String
+    var trailingTint: Color = RenewioTheme.accent
+    var trailingHelp: String = ""
+    let onSelect: () -> Void
+    let onTrailingAction: () -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Image(systemName: platformSystemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(RenewioTheme.accent)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(RenewioTheme.foreground)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 4)
+
+                TrailingCircleIconButton(
+                    systemImage: trailingSystemImage,
+                    tint: trailingTint,
+                    helpText: trailingHelp,
+                    action: onTrailingAction
+                )
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                CardSurface(
+                    fill: isSelected
+                        ? RenewioTheme.accent.opacity(0.12)
+                        : Color.white.opacity((isHovered || isFocused) ? 0.06 : 0.03),
+                    border: isSelected
+                        ? RenewioTheme.accent.opacity(0.45)
+                        : ((isHovered || isFocused) ? RenewioTheme.borderHover : RenewioTheme.border),
+                    cornerRadius: RenewioTheme.radiusMd
+                )
+            )
+        }
+        .buttonStyle(RenewioPressButtonStyle())
+        .focused($isFocused)
+        .interactiveHover($isHovered)
+        .animation(RenewioMotion.hover, value: isSelected)
+        .renewioFocusRing(isFocused: isFocused, cornerRadius: RenewioTheme.radiusMd)
     }
 }
 

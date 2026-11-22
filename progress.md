@@ -10,7 +10,7 @@ Formerly named **ReNuvio** — renamed to Renewio because the tool is multi-sour
 ./scripts/install-renewio.sh
 ```
 
-That builds a Release app, ad-hoc signs it, copies it to `/Applications/Renewio.app`, and writes a shareable DMG at `dist/Renewio-1.3.0.dmg` (drag into Applications).
+That builds a Release app, ad-hoc signs it, copies it to `/Applications/Renewio.app`, and writes a shareable DMG at `dist/Renewio-1.4.0.dmg` (drag into Applications).
 
 Then open from Applications, Spotlight, or:
 

@@ -155,19 +155,17 @@ struct OnboardingView: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(draftDevices) { device in
-                        HoverRevealDeleteRow(
-                            helpText: "Remove \(device.name)",
-                            onDelete: { removeDevice(device.id) }
-                        ) {
-                            SelectableOptionRow(
-                                title: device.name,
-                                subtitle: "\(device.platform.displayName) · \(device.id)",
-                                isSelected: selectedDeviceID == device.id,
-                                subtitleTruncation: .middle
-                            ) {
-                                selectedDeviceID = device.id
-                            }
-                        }
+                        DeviceTileRow(
+                            platformSystemImage: device.platform.systemImage,
+                            title: device.name,
+                            subtitle: "\(device.platform.displayName) · \(device.id)",
+                            isSelected: selectedDeviceID == device.id,
+                            trailingSystemImage: "xmark.circle",
+                            trailingTint: RenewioTheme.danger,
+                            trailingHelp: "Remove \(device.name)",
+                            onSelect: { selectedDeviceID = device.id },
+                            onTrailingAction: { removeDevice(device.id) }
+                        )
                     }
 
                     let trackedIDs = Set(draftDevices.map(\.id))
@@ -178,31 +176,16 @@ struct OnboardingView: View {
                             .foregroundStyle(RenewioTheme.mutedForeground)
                             .padding(.top, 4)
                         ForEach(untracked) { device in
-                            Button {
-                                addDevice(device.trackedDevice)
-                            } label: {
-                                HStack {
-                                    Image(systemName: device.platform.systemImage)
-                                        .foregroundStyle(RenewioTheme.accent)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(device.name)
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundStyle(RenewioTheme.foreground)
-                                        Text(device.displaySubtitle)
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundStyle(RenewioTheme.mutedForeground)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "plus.circle")
-                                        .foregroundStyle(RenewioTheme.accent)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(CardSurface(fill: Color.white.opacity(0.03), cornerRadius: 8))
-                            }
-                            .buttonStyle(RenewioPressButtonStyle())
+                            DeviceTileRow(
+                                platformSystemImage: device.platform.systemImage,
+                                title: device.name,
+                                subtitle: device.displaySubtitle,
+                                trailingSystemImage: "plus.circle",
+                                trailingTint: RenewioTheme.accent,
+                                trailingHelp: "Add \(device.name)",
+                                onSelect: { addDevice(device.trackedDevice) },
+                                onTrailingAction: { addDevice(device.trackedDevice) }
+                            )
                         }
                     }
                 }
@@ -265,18 +248,18 @@ struct OnboardingView: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
-                Button {
-                    if isEditing {
-                        cancelAppEditor()
-                    } else {
-                        beginEditApp(install)
+                TrailingCircleIconButton(
+                    systemImage: isEditing ? "xmark.circle" : "pencil.circle",
+                    tint: isEditing ? RenewioTheme.mutedForeground : RenewioTheme.accent,
+                    helpText: isEditing ? "Close" : "Edit \(install.name)",
+                    action: {
+                        if isEditing {
+                            cancelAppEditor()
+                        } else {
+                            beginEditApp(install)
+                        }
                     }
-                } label: {
-                    Text(isEditing ? "Close" : "Edit")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(isEditing ? RenewioTheme.mutedForeground : RenewioTheme.accent)
-                }
-                .buttonStyle(RenewioPressButtonStyle())
+                )
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -796,6 +779,12 @@ struct OnboardingView: View {
         } else if let droppedURL = model.pendingLocalIPAURL {
             model.pendingLocalIPAURL = nil
             prepareNewLocalIPA(url: droppedURL)
+        } else if model.pendingAddApp {
+            model.pendingAddApp = false
+            if selectedDeviceID == nil {
+                selectedDeviceID = draftDevices.first?.id
+            }
+            beginAddApp()
         }
 
         Task {
