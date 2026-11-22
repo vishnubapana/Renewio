@@ -264,8 +264,9 @@ struct RenewioPressButtonStyle: ButtonStyle {
 
 struct PopoverIconButton: View {
     let systemImage: String
-    let iconSize: CGFloat
-    let iconWeight: Font.Weight
+    var iconSize: CGFloat = 11
+    var iconWeight: Font.Weight = .semibold
+    var side: CGFloat = 24
     let hoverTint: Color
     let helpText: String
     let action: () -> Void
@@ -273,18 +274,20 @@ struct PopoverIconButton: View {
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
 
+    private var cornerRadius: CGFloat { RenewioTheme.radiusSm }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: iconSize, weight: iconWeight))
                 .foregroundStyle(isHovered || isFocused ? hoverTint : RenewioTheme.mutedForeground)
-                .frame(width: 32, height: 32)
+                .frame(width: side, height: side)
                 .background(
                     (isHovered || isFocused) ? hoverTint.opacity(0.15) : Color.white.opacity(0.05)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .stroke(
                             (isHovered || isFocused) ? hoverTint.opacity(0.45) : RenewioTheme.border,
                             lineWidth: 1
@@ -295,7 +298,7 @@ struct PopoverIconButton: View {
         .help(helpText)
         .focused($isFocused)
         .interactiveHover($isHovered)
-        .renewioFocusRing(isFocused: isFocused, cornerRadius: RenewioTheme.radiusMd)
+        .renewioFocusRing(isFocused: isFocused, cornerRadius: cornerRadius)
     }
 }
 

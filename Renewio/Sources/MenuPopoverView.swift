@@ -30,14 +30,14 @@ struct MenuPopoverView: View {
     }
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 8) {
             if devices.isEmpty {
                 Text("Renewio")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(RenewioTheme.foreground)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         ForEach(devices) { device in
                             DevicePill(
                                 device: device,
@@ -52,18 +52,17 @@ struct MenuPopoverView: View {
 
             Spacer(minLength: 4)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 PopoverIconButton(
                     systemImage: "gearshape.fill",
-                    iconSize: 14,
-                    iconWeight: .semibold,
+                    iconSize: 11,
                     hoverTint: RenewioTheme.accent,
                     helpText: "Settings",
                     action: { model.openOnboarding() }
                 )
                 PopoverIconButton(
                     systemImage: "xmark",
-                    iconSize: 12,
+                    iconSize: 10,
                     iconWeight: .bold,
                     hoverTint: RenewioTheme.danger,
                     helpText: "Quit Renewio",
@@ -154,21 +153,20 @@ private struct DevicePill: View {
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
 
+    private let pillHeight: CGFloat = 22
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: device.platform.systemImage)
-                    .font(.system(size: isSelected ? 11 : 12, weight: .semibold))
-                if isSelected {
-                    Text(device.name)
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                        .transition(.move(edge: .trailing).combined(with: .scale(scale: 0.92, anchor: .leading)))
-                }
+                    .font(.system(size: 9, weight: .semibold))
+                Text(device.name)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
             }
             .foregroundStyle(isSelected ? RenewioTheme.accentForeground : RenewioTheme.accent)
-            .padding(.horizontal, isSelected ? 10 : 0)
-            .frame(width: isSelected ? nil : 32, height: 32)
+            .padding(.horizontal, 8)
+            .frame(height: pillHeight)
             .background(
                 Capsule()
                     .fill(
@@ -181,7 +179,7 @@ private struct DevicePill: View {
                 Capsule()
                     .stroke(
                         RenewioTheme.accent.opacity(isSelected ? 0 : ((isHovered || isFocused) ? 1 : 0.85)),
-                        lineWidth: isSelected ? 0 : 1.5
+                        lineWidth: isSelected ? 0 : 1.25
                     )
             )
             .shadow(
@@ -193,7 +191,7 @@ private struct DevicePill: View {
         .help("\(device.name) · \(device.platform.displayName)")
         .focused($isFocused)
         .interactiveHover($isHovered)
-        .animation(RenewioMotion.transition, value: isSelected)
+        .animation(RenewioMotion.hover, value: isSelected)
     }
 }
 

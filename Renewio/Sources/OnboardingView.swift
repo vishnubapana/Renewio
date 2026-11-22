@@ -62,22 +62,22 @@ struct OnboardingView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             PopoverIconButton(
                 systemImage: "chevron.left",
-                iconSize: 13,
+                iconSize: 10,
                 iconWeight: .bold,
                 hoverTint: RenewioTheme.accent,
                 helpText: "Back to Renewio",
                 action: { model.handleSetupClosed() }
             )
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text("Settings")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(RenewioTheme.foreground)
                 Text("Devices, apps & GitHub sources")
-                    .font(.system(size: 11))
+                    .font(.system(size: 10))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             }
 
@@ -87,8 +87,8 @@ struct OnboardingView: View {
                 DeviceDiscovery.openXcodeAccounts()
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private var environmentWarningCard: some View {
@@ -859,25 +859,25 @@ private struct XcodeStatusButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                StatusDot(tint: tint)
+            HStack(spacing: 4) {
+                StatusDot(tint: tint, size: 5)
                 Text(ready ? "Xcode OK" : "Xcode")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(
                         (isHovered || isFocused)
                             ? RenewioTheme.foreground
                             : (ready ? RenewioTheme.mutedForeground : RenewioTheme.accent)
                     )
                 Image(systemName: "arrow.up.right")
-                    .font(.system(size: 8.5, weight: .semibold))
+                    .font(.system(size: 7.5, weight: .semibold))
                     .foregroundStyle(
                         (isHovered || isFocused)
                             ? RenewioTheme.accent
                             : RenewioTheme.mutedForeground.opacity(0.7)
                     )
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
             .background(
                 (isHovered || isFocused) ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.04)
             )
