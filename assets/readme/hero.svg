@@ -14,12 +14,11 @@
     </linearGradient>
   </defs>
 
-  <!-- Canvas -->
   <rect width="1200" height="380" rx="26" fill="#0A0A0F"/>
   <rect width="1200" height="380" rx="26" fill="url(#amberGlow)"/>
   <rect x="1" y="1" width="1198" height="378" rx="25" fill="none" stroke="#FFFFFF" stroke-opacity="0.08"/>
 
-  <!-- Title block -->
+  <!-- Title -->
   <g transform="translate(56 52)">
     <text x="0" y="0" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="3">MACOS · MENU BAR</text>
     <text x="0" y="72" fill="#FAFAFA" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="64" font-weight="700">Renewio</text>
@@ -30,7 +29,6 @@
       before your Personal Team profile expires.
     </text>
 
-    <!-- Meta chips -->
     <g transform="translate(0 196)">
       <rect width="148" height="36" rx="10" fill="#1A1A24" stroke="#FFFFFF" stroke-opacity="0.1"/>
       <text x="74" y="24" text-anchor="middle" fill="#FAFAFA" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">Apple CLI</text>
@@ -43,46 +41,52 @@
     </g>
   </g>
 
-  <!-- Proof panel: countdown card + renew cycle -->
+  <!-- Proof panel mirrors the real popover -->
   <g transform="translate(700 48)">
     <rect width="444" height="284" rx="18" fill="url(#cardFill)" stroke="#FFFFFF" stroke-opacity="0.1"/>
 
-    <!-- Fake menu-bar strip -->
-    <rect x="18" y="18" width="408" height="36" rx="10" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.08"/>
-    <circle cx="40" cy="36" r="5" fill="#F59E0B"/>
-    <path d="M52 36 a8 8 0 1 1 6.5-3.5" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
-    <path d="M67 32 l3 3 -3 3" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="84" y="41" fill="#A1A1AA" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">Renewio</text>
-    <rect x="330" y="26" width="28" height="20" rx="6" fill="#1A1A24" stroke="#FFFFFF" stroke-opacity="0.12"/>
-    <rect x="366" y="26" width="44" height="20" rx="6" fill="#F59E0B"/>
+    <!-- Top bar: equal-height device pills + actions -->
+    <g transform="translate(18 22)">
+      <!-- Living Room (selected) -->
+      <rect width="118" height="22" rx="11" fill="#F59E0B"/>
+      <text x="14" y="15" fill="#0A0A0F" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="600">▣</text>
+      <text x="30" y="15" fill="#0A0A0F" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="600">Living Room</text>
 
-    <!-- Device pills -->
-    <g transform="translate(18 70)">
-      <rect width="92" height="24" rx="12" fill="#F59E0B"/>
-      <text x="46" y="16" text-anchor="middle" fill="#0A0A0F" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="600">Apple TV</text>
-      <rect x="100" width="78" height="24" rx="12" fill="none" stroke="#F59E0B" stroke-opacity="0.7"/>
-      <text x="139" y="16" text-anchor="middle" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="600">iPhone</text>
-      <rect x="186" width="64" height="24" rx="12" fill="none" stroke="#F59E0B" stroke-opacity="0.45"/>
-      <text x="218" y="16" text-anchor="middle" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="600">iPad</text>
+      <!-- Second device (same height, outline + name) -->
+      <rect x="126" width="92" height="22" rx="11" fill="none" stroke="#F59E0B" stroke-opacity="0.85" stroke-width="1.25"/>
+      <text x="140" y="15" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="600">▢</text>
+      <text x="156" y="15" fill="#F59E0B" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="600">iPhone</text>
+
+      <!-- + gear x -->
+      <rect x="300" width="24" height="22" rx="6" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <text x="312" y="15" text-anchor="middle" fill="#A1A1AA" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">+</text>
+      <rect x="330" width="24" height="22" rx="6" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <circle cx="342" cy="11" r="3.5" fill="none" stroke="#A1A1AA" stroke-width="1.4"/>
+      <circle cx="342" cy="11" r="1.2" fill="#A1A1AA"/>
+      <rect x="360" width="24" height="22" rx="6" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <path d="M354 8 l8 8 M362 8 l-8 8" stroke="#A1A1AA" stroke-width="1.5" stroke-linecap="round"/>
     </g>
 
-    <!-- App countdown card -->
-    <g transform="translate(18 110)">
-      <rect width="408" height="96" rx="14" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.08"/>
-      <text x="18" y="30" fill="#FAFAFA" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="600">Nuvio TV</text>
-      <text x="110" y="30" fill="#71717A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">v3.5.2</text>
-      <circle cx="24" cy="56" r="4" fill="#4ADE80"/>
-      <text x="36" y="60" fill="#4ADE80" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">Active</text>
-      <text x="92" y="60" fill="#FAFAFA" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="700">4d 11h</text>
-      <rect x="18" y="74" width="280" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.08"/>
-      <rect x="18" y="74" width="168" height="4" rx="2" fill="#4ADE80"/>
-      <rect x="336" y="26" width="52" height="44" rx="10" fill="#F59E0B"/>
-      <path d="M354 40 a10 10 0 1 1 8 4" fill="none" stroke="#0A0A0F" stroke-width="2.5" stroke-linecap="round"/>
-      <path d="M370 36 l4 4 -4 4" fill="none" stroke="#0A0A0F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- App card -->
+    <g transform="translate(18 62)">
+      <rect width="408" height="120" rx="14" fill="#0A0A0F" stroke="#FFFFFF" stroke-opacity="0.08"/>
+      <text x="16" y="32" fill="#FAFAFA" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="600">Nuvio TV</text>
+      <text x="108" y="32" fill="#71717A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">v3.5.2</text>
+
+      <circle cx="22" cy="58" r="4" fill="#4ADE80"/>
+      <text x="34" y="62" fill="#4ADE80" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">Active</text>
+      <text x="88" y="62" fill="#FAFAFA" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" font-weight="700">6d 3h</text>
+      <text x="158" y="62" fill="#71717A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">· Nov 28</text>
+
+      <rect x="16" y="80" width="300" height="3" rx="1.5" fill="#FFFFFF" fill-opacity="0.08"/>
+      <rect x="16" y="80" width="220" height="3" rx="1.5" fill="#4ADE80"/>
+
+      <rect x="344" y="28" width="44" height="44" rx="10" fill="#F59E0B"/>
+      <path d="M358 42 a9 9 0 1 1 7 3.5" fill="none" stroke="#0A0A0F" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M372 38 l3.5 3.5 -3.5 3.5" fill="none" stroke="#0A0A0F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
 
-    <!-- Pipeline strip -->
-    <g transform="translate(18 226)">
+    <g transform="translate(18 210)">
       <text x="0" y="0" fill="#71717A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">GitHub IPA → resign → install</text>
       <text x="0" y="28" fill="#A1A1AA" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">xcodebuild · codesign · devicectl</text>
     </g>

@@ -6,6 +6,10 @@
 
 It pulls an unsigned IPA from **GitHub** (or a **local `.ipa`**), refreshes your Xcode signing profile with Apple’s own CLI tools, resigns, installs, and tracks the real expiry countdown per app.
 
+<p align="center">
+  <img src="assets/readme/popover.png" alt="Renewio menu popover showing Living Room Apple TV with Nuvio TV active countdown and Renew button" width="420">
+</p>
+
 ---
 
 <p align="center">
