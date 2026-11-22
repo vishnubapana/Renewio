@@ -1,12 +1,20 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
+
+    private enum SourceKind {
+        case github
+        case localIPA
+    }
 
     @State private var teamID = ""
     @State private var discovered: [AppleDevice] = []
     @State private var isLoadingDevices = true
     @State private var errorMessage: String?
+    @State private var infoBanner: String?
     @State private var xcodeOK = true
     @State private var sdks = AvailableSDKs(tvOS: true, iOS: true)
     @State private var isSaving = false
@@ -17,8 +25,17 @@ struct OnboardingView: View {
     @State private var editingInstall: TrackedAppInstall?
     @State private var isScanningReleases = false
     @State private var sourceDraftURL = ""
+    @State private var sourceKind: SourceKind = .github
     @State private var isRepoVerified = false
     @State private var isAddingNewApp = false
+
+    // Preferences & Maintenance
+    @State private var launchAtLogin = LaunchAtLoginManager.isEnabled
+    @State private var autoRenewEnabled = false
+    @State private var githubTokenInput = ""
+    @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
+    @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
+
     /// Scroll anchor to restore when the edit panel closes.
     @State private var scrollRestoreID: String?
     @State private var scrollToEditID: String?
@@ -36,6 +53,10 @@ struct OnboardingView: View {
                         devicesSection
                         appsSection
                         teamSection
+                        preferencesSection
+                        if let infoBanner {
+                            successBanner(infoBanner)
+                        }
                         if let errorMessage {
                             errorBanner(errorMessage)
                         }
@@ -76,7 +97,7 @@ struct OnboardingView: View {
                 Text("Settings")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(RenewioTheme.foreground)
-                Text("Devices, apps & GitHub sources")
+                Text("Devices, apps & preferences")
                     .font(.system(size: 10))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             }
@@ -134,13 +155,18 @@ struct OnboardingView: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(draftDevices) { device in
-                        SelectableOptionRow(
-                            title: device.name,
-                            subtitle: "\(device.platform.displayName) · \(device.id)",
-                            isSelected: selectedDeviceID == device.id,
-                            subtitleTruncation: .middle
+                        HoverRevealDeleteRow(
+                            helpText: "Remove \(device.name)",
+                            onDelete: { removeDevice(device.id) }
                         ) {
-                            selectedDeviceID = device.id
+                            SelectableOptionRow(
+                                title: device.name,
+                                subtitle: "\(device.platform.displayName) · \(device.id)",
+                                isSelected: selectedDeviceID == device.id,
+                                subtitleTruncation: .middle
+                            ) {
+                                selectedDeviceID = device.id
+                            }
                         }
                     }
 
@@ -200,7 +226,7 @@ struct OnboardingView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             } else if installsForSelected.isEmpty && editingInstall == nil && !isAddingNewApp {
-                Text("No apps yet. Tap Add app and paste a GitHub HTTPS clone link.")
+                Text("No apps yet. Tap Add app for a GitHub repo or local .ipa.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             } else {
@@ -232,7 +258,7 @@ struct OnboardingView: View {
                     Text(display.name)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(RenewioTheme.foreground)
-                    Text("\(display.githubRepo) · \(display.bundleID)")
+                    Text("\(display.sourceLabel) · \(display.bundleID)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(RenewioTheme.mutedForeground)
                         .lineLimit(1)
@@ -283,7 +309,7 @@ struct OnboardingView: View {
                     Text(install.name.isEmpty ? "New app" : install.name)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(RenewioTheme.foreground)
-                    Text("\(install.githubRepo) · \(install.bundleID)")
+                    Text("\(install.sourceLabel) · \(install.bundleID)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(RenewioTheme.mutedForeground)
                         .lineLimit(1)
@@ -335,85 +361,155 @@ struct OnboardingView: View {
 
     private var sourcePasteStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Add app")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(RenewioTheme.foreground)
-            Text("Paste the GitHub HTTPS clone link to verify the repo.")
-                .font(.system(size: 11))
-                .foregroundStyle(RenewioTheme.mutedForeground)
-
-            RenewioTextField(
-                placeholder: "https://github.com/owner/repo.git",
-                text: $sourceDraftURL,
-                monospaced: true
-            )
-            .onSubmit {
-                Task { await verifyAndResolveSource() }
+            HStack(spacing: 6) {
+                sourceTabButton("GitHub Repo", kind: .github)
+                sourceTabButton("Local .ipa", kind: .localIPA)
             }
 
-            HStack(spacing: 8) {
-                Button("Cancel") {
-                    cancelAppEditor()
-                }
-                .buttonStyle(SecondaryButtonStyle())
-                .frame(width: 92)
+            if sourceKind == .github {
+                Text("Paste the GitHub HTTPS clone link to verify the repo.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
 
-                Button {
+                RenewioTextField(
+                    placeholder: "https://github.com/owner/repo.git",
+                    text: $sourceDraftURL,
+                    monospaced: true
+                )
+                .onSubmit {
                     Task { await verifyAndResolveSource() }
-                } label: {
-                    LoadingLabel(
-                        title: isScanningReleases ? "Verifying…" : "Continue",
-                        isLoading: isScanningReleases,
-                        tint: RenewioTheme.accentForeground
-                    )
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(isScanningReleases || sourceDraftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        cancelAppEditor()
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .frame(width: 92)
+
+                    Button {
+                        Task { await verifyAndResolveSource() }
+                    } label: {
+                        LoadingLabel(
+                            title: isScanningReleases ? "Verifying…" : "Continue",
+                            isLoading: isScanningReleases,
+                            tint: RenewioTheme.accentForeground
+                        )
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(isScanningReleases || sourceDraftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else {
+                Text("Choose an .ipa file on your Mac (or drop one onto Renewio).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        cancelAppEditor()
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .frame(width: 92)
+
+                    Button {
+                        chooseLocalIPA()
+                    } label: {
+                        Label("Choose .ipa…", systemImage: "doc.badge.plus")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
             }
         }
         .padding(10)
         .background(CardSurface(fill: RenewioTheme.accent.opacity(0.06), border: RenewioTheme.accent.opacity(0.25)))
     }
 
+    private func sourceTabButton(_ title: String, kind: SourceKind) -> some View {
+        let active = sourceKind == kind
+        return Button {
+            withAnimation(RenewioMotion.hover) {
+                sourceKind = kind
+                errorMessage = nil
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(active ? RenewioTheme.accentForeground : RenewioTheme.mutedForeground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity)
+                .background(active ? RenewioTheme.accent : Color.white.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusSm, style: .continuous))
+        }
+        .buttonStyle(RenewioPressButtonStyle())
+    }
+
     private func appEditorFields(_ install: TrackedAppInstall, isNew: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isLocal = editingInstall?.isLocalIPA ?? install.isLocalIPA
+        return VStack(alignment: .leading, spacing: 10) {
             labeledField("Name") {
                 RenewioTextField(placeholder: "App name", text: binding(\.name, in: install))
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("VERSION")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(RenewioTheme.mutedForeground)
-                    Spacer()
-                    InlineActionLink(
-                        title: isScanningReleases ? "Scanning…" : "Scan",
-                        systemImage: "arrow.clockwise",
-                        disabled: isScanningReleases
-                    ) {
-                        Task { await scanReleases() }
+            if isLocal {
+                labeledField("Local IPA") {
+                    HStack(spacing: 8) {
+                        Text(editingInstall?.sourceLabel ?? install.sourceLabel)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(RenewioTheme.foreground)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(RenewioTheme.background.opacity(0.75))
+                            .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                                    .stroke(RenewioTheme.border, lineWidth: 1)
+                            )
+                        InlineActionLink(title: "Change", systemImage: "folder") {
+                            chooseLocalIPA(updatingExisting: true)
+                        }
                     }
                 }
-                SelectableOptionRow(
-                    title: "Latest release",
-                    subtitle: "Auto-fetch newest from GitHub",
-                    isSelected: (editingInstall?.selectedTag ?? "").isEmpty
-                ) {
-                    editingInstall?.selectedTag = nil
-                }
-                ForEach(model.availableVersions) { option in
-                    let meta = option.isCached
-                        ? (option.formattedSize.isEmpty ? "Cached" : "Cached · \(option.formattedSize)")
-                        : (option.formattedSize.isEmpty ? "Download on install" : "GitHub · \(option.formattedSize)")
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("VERSION")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(RenewioTheme.mutedForeground)
+                        Spacer()
+                        InlineActionLink(
+                            title: isScanningReleases ? "Scanning…" : "Scan",
+                            systemImage: "arrow.clockwise",
+                            disabled: isScanningReleases
+                        ) {
+                            Task { await scanReleases() }
+                        }
+                    }
                     SelectableOptionRow(
-                        title: option.displayVersion,
-                        subtitle: meta,
-                        isSelected: editingInstall?.selectedTag == option.tag
+                        title: "Latest release",
+                        subtitle: "Auto-fetch newest from GitHub",
+                        isSelected: (editingInstall?.selectedTag ?? "").isEmpty
                     ) {
-                        editingInstall?.selectedTag = option.tag
+                        editingInstall?.selectedTag = nil
+                    }
+                    ForEach(model.availableVersions) { option in
+                        let meta = option.isCached
+                            ? (option.formattedSize.isEmpty ? "Cached" : "Cached · \(option.formattedSize)")
+                            : (option.formattedSize.isEmpty ? "Download on install" : "GitHub · \(option.formattedSize)")
+                        SelectableOptionRow(
+                            title: option.displayVersion,
+                            subtitle: meta,
+                            isSelected: editingInstall?.selectedTag == option.tag
+                        ) {
+                            editingInstall?.selectedTag = option.tag
+                        }
                     }
                 }
             }
@@ -465,15 +561,14 @@ struct OnboardingView: View {
     private static let newAppEditAnchorID = "app-edit-new"
 
     private func beginAddApp() {
-        guard let deviceID = selectedDeviceID else {
+        guard selectedDeviceID != nil else {
             errorMessage = "Select or add a device first."
             return
         }
-        _ = deviceID
-        // Don't restore scroll when leaving an edit to start Add app.
         scrollToEditID = nil
         scrollRestoreID = nil
         withAnimation(RenewioMotion.expand) {
+            sourceKind = .github
             isAddingNewApp = true
             isRepoVerified = false
             sourceDraftURL = ""
@@ -490,17 +585,21 @@ struct OnboardingView: View {
         withAnimation(RenewioMotion.expand) {
             isAddingNewApp = false
             isRepoVerified = true
-            sourceDraftURL = "https://github.com/\(install.githubRepo).git"
+            sourceKind = install.isLocalIPA ? .localIPA : .github
+            sourceDraftURL = install.isLocalIPA ? "" : "https://github.com/\(install.githubRepo).git"
             editingInstall = install
             errorMessage = nil
         }
-        model.refreshVersions(forRepo: install.githubRepo)
-        // Reset then set so onChange fires even when re-editing the same app.
+        if !install.isLocalIPA {
+            model.refreshVersions(forRepo: install.githubRepo)
+            Task { await scanReleases() }
+        } else {
+            model.availableVersions = []
+        }
         scrollToEditID = nil
         Task { @MainActor in
             scrollToEditID = editID
         }
-        Task { await scanReleases() }
     }
 
     private func cancelAppEditor() {
@@ -517,7 +616,6 @@ struct OnboardingView: View {
 
     private func scrollEditPanelIntoView(proxy: ScrollViewProxy, editID: String) {
         Task { @MainActor in
-            // Wait for ExpandablePanel height animation / measure.
             try? await Task.sleep(nanoseconds: 320_000_000)
             guard scrollToEditID == editID else { return }
             withAnimation(RenewioMotion.expand) {
@@ -549,6 +647,97 @@ struct OnboardingView: View {
             Text("Shared across all devices and apps. Apple ID stays in Xcode.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(RenewioTheme.mutedForeground)
+        }
+    }
+
+    // MARK: - Preferences & Storage
+
+    private var preferencesSection: some View {
+        SectionCard("PREFERENCES", spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                PreferenceToggleRow(
+                    title: "Launch at login",
+                    subtitle: "Keep Renewio in your menu bar after restarts",
+                    isOn: Binding(
+                        get: { launchAtLogin },
+                        set: { toggleLaunchAtLogin($0) }
+                    )
+                )
+
+                PreferenceToggleRow(
+                    title: "Auto-renew when nearby",
+                    subtitle: "Refresh apps within 24h of expiry if device is awake",
+                    isOn: $autoRenewEnabled
+                )
+
+                Divider().overlay(RenewioTheme.border)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("GITHUB TOKEN (OPTIONAL)")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(RenewioTheme.mutedForeground)
+                        Spacer()
+                        if hasSavedGitHubToken {
+                            Text("Saved in Keychain")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(RenewioTheme.success)
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        SecureField(
+                            hasSavedGitHubToken ? "•••••••••••• (replace token)" : "ghp_… for private repos / rate limits",
+                            text: $githubTokenInput
+                        )
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(RenewioTheme.background.opacity(0.75))
+                        .foregroundStyle(RenewioTheme.foreground)
+                        .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                                .stroke(RenewioTheme.border, lineWidth: 1)
+                        )
+
+                        if !githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            InlineActionLink(title: "Save", systemImage: "key.fill") {
+                                saveGitHubToken()
+                            }
+                        } else if hasSavedGitHubToken {
+                            InlineActionLink(title: "Clear", systemImage: "trash") {
+                                clearGitHubToken()
+                            }
+                        }
+                    }
+                }
+
+                Divider().overlay(RenewioTheme.border)
+
+                HStack(spacing: 8) {
+                    Button {
+                        NSWorkspace.shared.open(RenewRunner.logDirectoryURL)
+                    } label: {
+                        Label("Open Logs", systemImage: "doc.text.magnifyingglass")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+
+                    Button {
+                        clearCache()
+                    } label: {
+                        let formatted = ByteCountFormatter.string(fromByteCount: cacheSizeBytes, countStyle: .file)
+                        Label(
+                            cacheSizeBytes > 0 ? "Clear Cache (\(formatted))" : "Cache Empty",
+                            systemImage: "trash"
+                        )
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(cacheSizeBytes == 0)
+                }
+            }
         }
     }
 
@@ -594,6 +783,19 @@ struct OnboardingView: View {
             draftDevices = existing.devices
             draftInstalls = existing.installs
             selectedDeviceID = existing.selectedDeviceID ?? existing.devices.first?.id
+            autoRenewEnabled = existing.isAutoRenewEnabled
+        }
+        launchAtLogin = LaunchAtLoginManager.isEnabled
+        hasSavedGitHubToken = KeychainStore.hasGitHubToken
+        cacheSizeBytes = ConfigStore.cacheSizeBytes()
+
+        if let editID = model.editingInstallID,
+           let target = draftInstalls.first(where: { $0.id == editID }) {
+            selectedDeviceID = target.deviceID
+            beginEditApp(target)
+        } else if let droppedURL = model.pendingLocalIPAURL {
+            model.pendingLocalIPAURL = nil
+            prepareNewLocalIPA(url: droppedURL)
         }
 
         Task {
@@ -623,13 +825,25 @@ struct OnboardingView: View {
         errorMessage = nil
     }
 
+    private func removeDevice(_ deviceID: String) {
+        withAnimation(RenewioMotion.expand) {
+            draftDevices.removeAll { $0.id == deviceID }
+            draftInstalls.removeAll { $0.deviceID == deviceID }
+            if editingInstall?.deviceID == deviceID {
+                cancelAppEditor()
+            }
+            if selectedDeviceID == deviceID {
+                selectedDeviceID = draftDevices.first?.id
+            }
+        }
+    }
+
     private func refreshDevices() async {
         isLoadingDevices = true
         errorMessage = nil
         defer { isLoadingDevices = false }
         do {
             discovered = try await DeviceDiscovery.listDevices()
-            // Auto-add first discovered device if none tracked yet.
             if draftDevices.isEmpty, let first = discovered.first {
                 addDevice(first.trackedDevice)
             }
@@ -646,6 +860,52 @@ struct OnboardingView: View {
             teamID = first.id
         } else {
             errorMessage = "No Xcode team found. Sign in under Xcode → Settings → Accounts."
+        }
+    }
+
+    private func chooseLocalIPA(updatingExisting: Bool = false) {
+        let panel = NSOpenPanel()
+        panel.title = "Choose an .ipa file"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let ipaType = UTType(filenameExtension: "ipa") {
+            panel.allowedContentTypes = [ipaType]
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if updatingExisting {
+            editingInstall?.localIPAPath = url.path
+            editingInstall?.githubRepo = ""
+            editingInstall?.selectedTag = nil
+        } else {
+            prepareNewLocalIPA(url: url)
+        }
+    }
+
+    private func prepareNewLocalIPA(url: URL) {
+        guard let deviceID = selectedDeviceID ?? draftDevices.first?.id else {
+            errorMessage = "Add or select a device before adding a local .ipa."
+            return
+        }
+        selectedDeviceID = deviceID
+        let rawName = url.deletingPathExtension().lastPathComponent
+        let appName = friendlyAppName(from: GitHubRepoInfo(ownerRepo: "", name: rawName, fullName: rawName, description: nil))
+        let team = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        isAddingNewApp = true
+        sourceKind = .localIPA
+        model.availableVersions = []
+        editingInstall = TrackedAppInstall(
+            deviceID: deviceID,
+            name: appName,
+            githubRepo: "",
+            bundleID: suggestedBundleID(team: team, appName: appName),
+            localIPAPath: url.path
+        )
+        withAnimation(RenewioMotion.expand) {
+            isRepoVerified = true
         }
     }
 
@@ -691,15 +951,20 @@ struct OnboardingView: View {
 
     private func finishEditingApp() {
         guard var edited = editingInstall else { return }
-        guard let normalized = GitHubSource.normalize(edited.githubRepo) else {
-            errorMessage = "GitHub source is invalid. Cancel and paste the clone link again."
-            return
+        if edited.isLocalIPA {
+            edited.githubRepo = ""
+            edited.selectedTag = nil
+        } else {
+            guard let normalized = GitHubSource.normalize(edited.githubRepo) else {
+                errorMessage = "GitHub source is invalid. Cancel and paste the clone link again."
+                return
+            }
+            edited.githubRepo = normalized
         }
-        edited.githubRepo = normalized
         edited.bundleID = edited.bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
         edited.name = edited.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if edited.name.isEmpty {
-            edited.name = friendlyAppName(fromRepo: normalized)
+            edited.name = edited.isLocalIPA ? edited.sourceLabel : friendlyAppName(fromRepo: edited.githubRepo)
         }
         guard edited.bundleID.contains(".") else {
             errorMessage = "App needs a Bundle ID like com.renewio.app."
@@ -711,6 +976,58 @@ struct OnboardingView: View {
             draftInstalls.append(edited)
         }
         cancelAppEditor()
+    }
+
+    private func toggleLaunchAtLogin(_ enabled: Bool) {
+        errorMessage = nil
+        do {
+            try LaunchAtLoginManager.setEnabled(enabled)
+            launchAtLogin = LaunchAtLoginManager.isEnabled
+        } catch {
+            launchAtLogin = LaunchAtLoginManager.isEnabled
+            errorMessage = "Launch at Login failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveGitHubToken() {
+        let token = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        if KeychainStore.saveGitHubToken(token) {
+            githubTokenInput = ""
+            hasSavedGitHubToken = true
+            showTemporaryInfo("GitHub token saved in Keychain.")
+        } else {
+            errorMessage = "Could not save GitHub token to Keychain."
+        }
+    }
+
+    private func clearGitHubToken() {
+        _ = KeychainStore.deleteGitHubToken()
+        githubTokenInput = ""
+        hasSavedGitHubToken = false
+        showTemporaryInfo("GitHub token removed from Keychain.")
+    }
+
+    private func clearCache() {
+        errorMessage = nil
+        do {
+            let freed = try ConfigStore.clearIPACache()
+            cacheSizeBytes = ConfigStore.cacheSizeBytes()
+            let formatted = ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)
+            showTemporaryInfo("Cleared IPA cache (\(formatted) freed).")
+        } catch {
+            errorMessage = "Could not clear cache: \(error.localizedDescription)"
+        }
+    }
+
+    private func showTemporaryInfo(_ message: String) {
+        infoBanner = message
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if infoBanner == message {
+                infoBanner = nil
+            }
+        }
     }
 
     private func friendlyAppName(from info: GitHubRepoInfo) -> String {
@@ -771,7 +1088,8 @@ struct OnboardingView: View {
             teamID: trimmedTeam,
             devices: draftDevices,
             installs: draftInstalls,
-            selectedDeviceID: selectedDeviceID ?? draftDevices.first?.id
+            selectedDeviceID: selectedDeviceID ?? draftDevices.first?.id,
+            autoRenewEnabled: autoRenewEnabled
         )
         do {
             try model.configStore.save(config)
@@ -827,6 +1145,21 @@ struct OnboardingView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CardSurface(fill: RenewioTheme.danger.opacity(0.12), border: RenewioTheme.danger.opacity(0.35), cornerRadius: 10))
+    }
+
+    private func successBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(RenewioTheme.success)
+            Text(message)
+                .font(.system(size: 11.5))
+                .foregroundStyle(RenewioTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CardSurface(fill: RenewioTheme.success.opacity(0.12), border: RenewioTheme.success.opacity(0.35), cornerRadius: 10))
     }
 
     private func checklistRow(ok: Bool, title: String, detail: String) -> some View {

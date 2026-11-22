@@ -59,9 +59,11 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
     var githubRepo: String
     var bundleID: String
     var selectedTag: String?
+    var localIPAPath: String?
     var lastInstalledVersion: String?
     var lastInstalledTag: String?
     var lastInstalledAt: String?
+    var lastExpiresAt: String?
     var lastAssetName: String?
 
     static let defaultGitHubRepo = "bobsupra/NuvioTVOS"
@@ -74,9 +76,11 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         githubRepo: String = TrackedAppInstall.defaultGitHubRepo,
         bundleID: String,
         selectedTag: String? = nil,
+        localIPAPath: String? = nil,
         lastInstalledVersion: String? = nil,
         lastInstalledTag: String? = nil,
         lastInstalledAt: String? = nil,
+        lastExpiresAt: String? = nil,
         lastAssetName: String? = nil
     ) {
         self.id = id
@@ -85,14 +89,56 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         self.githubRepo = githubRepo
         self.bundleID = bundleID
         self.selectedTag = selectedTag
+        self.localIPAPath = localIPAPath
         self.lastInstalledVersion = lastInstalledVersion
         self.lastInstalledTag = lastInstalledTag
         self.lastInstalledAt = lastInstalledAt
+        self.lastExpiresAt = lastExpiresAt
         self.lastAssetName = lastAssetName
     }
 
+    var isLocalIPA: Bool {
+        guard let path = localIPAPath?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !path.isEmpty
+    }
+
+    var sourceLabel: String {
+        if isLocalIPA, let path = localIPAPath {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+        return githubRepo
+    }
+
     var lastInstalledDate: Date? {
-        guard let raw = lastInstalledAt, !raw.isEmpty else { return nil }
+        Self.parseISO8601(lastInstalledAt)
+    }
+
+    /// Real expiration from the provisioning profile when available; falls back to 7 days from install.
+    var expiresAt: Date? {
+        if let realExpiry = Self.parseISO8601(lastExpiresAt) {
+            return realExpiry
+        }
+        return lastInstalledDate?.addingTimeInterval(Self.signingLifetime)
+    }
+
+    /// Effective signing lifetime (e.g. 7 days for free Personal Team, 365 days for paid Developer).
+    var signingDuration: TimeInterval {
+        if let installed = lastInstalledDate, let expires = Self.parseISO8601(lastExpiresAt) {
+            let delta = expires.timeIntervalSince(installed)
+            if delta >= 3600 {
+                return delta
+            }
+        }
+        return Self.signingLifetime
+    }
+
+    var displayVersion: String? {
+        guard let version = lastInstalledVersion, !version.isEmpty else { return nil }
+        return version.hasPrefix("v") ? version : "v\(version)"
+    }
+
+    static func parseISO8601(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
         let withFractional = ISO8601DateFormatter()
         withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let parsed = withFractional.date(from: raw) {
@@ -102,15 +148,6 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         standard.formatOptions = [.withInternetDateTime]
         return standard.date(from: raw)
     }
-
-    var expiresAt: Date? {
-        lastInstalledDate?.addingTimeInterval(Self.signingLifetime)
-    }
-
-    var displayVersion: String? {
-        guard let version = lastInstalledVersion, !version.isEmpty else { return nil }
-        return version.hasPrefix("v") ? version : "v\(version)"
-    }
 }
 
 struct RenewioConfig: Codable, Equatable {
@@ -119,6 +156,7 @@ struct RenewioConfig: Codable, Equatable {
     var devices: [TrackedDevice]
     var installs: [TrackedAppInstall]
     var selectedDeviceID: String?
+    var autoRenewEnabled: Bool?
 
     static let currentSchemaVersion = 2
 
@@ -127,13 +165,19 @@ struct RenewioConfig: Codable, Equatable {
         teamID: String,
         devices: [TrackedDevice] = [],
         installs: [TrackedAppInstall] = [],
-        selectedDeviceID: String? = nil
+        selectedDeviceID: String? = nil,
+        autoRenewEnabled: Bool? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.teamID = teamID
         self.devices = devices
         self.installs = installs
         self.selectedDeviceID = selectedDeviceID
+        self.autoRenewEnabled = autoRenewEnabled
+    }
+
+    var isAutoRenewEnabled: Bool {
+        autoRenewEnabled ?? false
     }
 
     var isComplete: Bool {
@@ -199,6 +243,7 @@ struct RenewioConfig: Codable, Equatable {
         version: String,
         tag: String?,
         assetName: String?,
+        expiresAt: String? = nil,
         installedAt: Date = Date()
     ) {
         guard let idx = installs.firstIndex(where: { $0.id == installID }) else { return }
@@ -208,11 +253,16 @@ struct RenewioConfig: Codable, Equatable {
         installs[idx].lastInstalledTag = tag
         installs[idx].lastAssetName = assetName
         installs[idx].lastInstalledAt = formatter.string(from: installedAt)
+        if let expiresAt, !expiresAt.isEmpty {
+            installs[idx].lastExpiresAt = expiresAt
+        } else {
+            installs[idx].lastExpiresAt = nil
+        }
     }
 }
 
 /// Legacy v1 flat config used only for migration.
-private struct LegacyRenewioConfig: Codable {
+struct LegacyRenewioConfig: Codable {
     var teamID: String?
     var bundleID: String?
     var deviceID: String?
@@ -293,7 +343,6 @@ enum GitHubSource {
         if value.lowercased().hasSuffix(".git") {
             value = String(value.dropLast(4))
         }
-        // Drop extra path segments (tree/main, releases, etc.)
         let segments = value.split(separator: "/").map(String.init)
         guard segments.count >= 2 else { return nil }
         let owner = segments[0]
@@ -312,7 +361,9 @@ final class ConfigStore: ObservableObject {
     private let fileURL: URL
 
     init(fileURL: URL? = nil) {
-        Self.migrateLegacySupportDirectoriesIfNeeded()
+        if fileURL == nil {
+            Self.migrateLegacySupportDirectoriesIfNeeded()
+        }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Renewio", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
@@ -341,7 +392,6 @@ final class ConfigStore: ObservableObject {
                 try? fm.moveItem(at: legacy, to: modern)
                 continue
             }
-            // Prefer keeping modern; copy missing children from legacy, then remove legacy.
             if let children = try? fm.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil) {
                 for child in children {
                     let dest = modern.appendingPathComponent(child.lastPathComponent)
@@ -407,7 +457,7 @@ final class ConfigStore: ObservableObject {
         config = next
     }
 
-    private static func migrateLegacy(_ legacy: LegacyRenewioConfig) -> RenewioConfig? {
+    static func migrateLegacy(_ legacy: LegacyRenewioConfig) -> RenewioConfig? {
         let teamID = (legacy.teamID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let deviceID = (legacy.deviceID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let bundleID = (legacy.bundleID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -459,6 +509,35 @@ final class ConfigStore: ObservableObject {
     /// Legacy flat downloads folder (pre per-repo layout).
     static var legacyDownloadsDirectoryURL: URL { downloadsRootURL }
 
+    static func cacheSizeBytes() -> Int64 {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: downloadsRootURL,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            guard let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                  vals.isRegularFile == true
+            else { continue }
+            total += Int64(vals.fileSize ?? 0)
+        }
+        return total
+    }
+
+    @discardableResult
+    static func clearIPACache() throws -> Int64 {
+        let freed = cacheSizeBytes()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: downloadsRootURL.path) {
+            try fm.removeItem(at: downloadsRootURL)
+        }
+        try fm.createDirectory(at: downloadsRootURL, withIntermediateDirectories: true)
+        return freed
+    }
+
     static func listCachedVersions(forRepo repo: String, limit: Int = 3) -> [CachedVersion] {
         var dirs = [downloadsDirectoryURL(forRepo: repo)]
         if repo == TrackedAppInstall.defaultGitHubRepo {
@@ -503,6 +582,17 @@ final class ConfigStore: ObservableObject {
         return Array(items.sorted { $0.modifiedAt > $1.modifiedAt }.prefix(limit))
     }
 
+    private static func githubRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Renewio", forHTTPHeaderField: "User-Agent")
+        if let token = KeychainStore.readGitHubToken(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 15
+        return request
+    }
+
     static func fetchRepoInfo(repo: String) async throws -> GitHubRepoInfo {
         guard let normalized = GitHubSource.normalize(repo),
               let encoded = normalized.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
@@ -515,17 +605,20 @@ final class ConfigStore: ObservableObject {
             )
         }
 
-        var request = URLRequest(url: url)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Renewio", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 15
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: githubRequest(url: url))
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            let hint: String
+            if http.statusCode == 403 || http.statusCode == 429 {
+                hint = "GitHub rate limit reached (HTTP \(http.statusCode)). Add a GitHub token in Settings."
+            } else if http.statusCode == 404 {
+                hint = "Repository \(normalized) not found (HTTP 404). If private, add a GitHub token in Settings."
+            } else {
+                hint = "GitHub returned HTTP \(http.statusCode) for \(normalized)."
+            }
             throw NSError(
                 domain: "Renewio",
                 code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "GitHub returned HTTP \(http.statusCode) for \(normalized)."]
+                userInfo: [NSLocalizedDescriptionKey: hint]
             )
         }
 
@@ -561,17 +654,18 @@ final class ConfigStore: ObservableObject {
             )
         }
 
-        var request = URLRequest(url: url)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Renewio", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 15
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: githubRequest(url: url))
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            let hint: String
+            if http.statusCode == 403 || http.statusCode == 429 {
+                hint = "GitHub rate limit reached (HTTP \(http.statusCode)). Add a GitHub token in Settings."
+            } else {
+                hint = "GitHub returned HTTP \(http.statusCode)."
+            }
             throw NSError(
                 domain: "Renewio",
                 code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "GitHub returned HTTP \(http.statusCode)."]
+                userInfo: [NSLocalizedDescriptionKey: hint]
             )
         }
 

@@ -515,3 +515,206 @@ struct SelectableOptionRow: View {
         .renewioFocusRing(isFocused: isFocused, cornerRadius: RenewioTheme.radiusMd)
     }
 }
+
+// MARK: - Hover Reveal Delete
+
+private struct HoverRevealRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Foreground content slides left on hover to reveal a trailing delete button.
+///
+/// The sliding layer sits on an opaque `sectionInset` base so translucent nested row
+/// fills (SelectableOptionRow / CardSurface) still match SectionCard styling without
+/// the delete control showing through. The delete control is a square matching the
+/// row’s measured height.
+struct HoverRevealDeleteRow<Content: View>: View {
+    var helpText: String = "Remove"
+    let onDelete: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    @State private var isRowHovered = false
+    @State private var rowHeight: CGFloat = 36
+
+    private var revealSide: CGFloat { max(36, rowHeight) }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HoverRevealDeleteButton(
+                side: revealSide,
+                helpText: helpText,
+                action: onDelete
+            )
+
+            content()
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: HoverRevealRowHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+                .background(
+                    RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                        .fill(RenewioTheme.sectionInset)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+                .offset(x: isRowHovered ? -revealSide : 0)
+                .animation(RenewioMotion.hover, value: isRowHovered)
+        }
+        .onPreferenceChange(HoverRevealRowHeightKey.self) { height in
+            guard height > 1, abs(height - rowHeight) > 0.5 else { return }
+            rowHeight = height
+        }
+        .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+        .interactiveHover($isRowHovered)
+    }
+}
+
+private struct HoverRevealDeleteButton: View {
+    let side: CGFloat
+    let helpText: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var cornerRadius: CGFloat { RenewioTheme.radiusSm }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: max(11, side * 0.28), weight: .semibold))
+                .foregroundStyle(
+                    (isHovered || isFocused)
+                        ? Color.white
+                        : RenewioTheme.danger
+                )
+                .frame(width: side, height: side)
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            (isHovered || isFocused)
+                                ? RenewioTheme.danger.opacity(0.9)
+                                : RenewioTheme.danger.opacity(0.14)
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(
+                            RenewioTheme.danger.opacity((isHovered || isFocused) ? 0.85 : 0.35),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(
+                    color: RenewioTheme.danger.opacity((isHovered || isFocused) ? 0.35 : 0),
+                    radius: (isHovered || isFocused) ? 8 : 0
+                )
+        }
+        .buttonStyle(RenewioPressButtonStyle())
+        .help(helpText)
+        .accessibilityLabel(helpText)
+        .focused($isFocused)
+        .interactiveHover($isHovered)
+        .animation(RenewioMotion.hover, value: isHovered)
+        .animation(RenewioMotion.hover, value: isFocused)
+        .animation(RenewioMotion.hover, value: side)
+        .renewioFocusRing(isFocused: isFocused, cornerRadius: cornerRadius)
+    }
+}
+
+// MARK: - Preference Toggle (rectangular light switch)
+
+struct PreferenceToggleRow: View {
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(RenewioTheme.foreground)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(RenewioLightSwitchStyle())
+                .accessibilityLabel(title)
+        }
+    }
+}
+
+/// Rectangular light-switch style toggle (not a capsule).
+struct RenewioLightSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        RenewioLightSwitchBody(configuration: configuration)
+    }
+}
+
+private struct RenewioLightSwitchBody: View {
+    let configuration: ToggleStyle.Configuration
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private let trackWidth: CGFloat = 36
+    private let trackHeight: CGFloat = 20
+    private let knobWidth: CGFloat = 14
+    private let knobHeight: CGFloat = 14
+    private let inset: CGFloat = 3
+
+    var body: some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                RoundedRectangle(cornerRadius: RenewioTheme.radiusSm, style: .continuous)
+                    .fill(
+                        configuration.isOn
+                            ? RenewioTheme.accent.opacity(isEnabled ? 1 : 0.4)
+                            : Color.white.opacity(isEnabled ? 0.06 : 0.03)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: RenewioTheme.radiusSm, style: .continuous)
+                            .stroke(
+                                configuration.isOn
+                                    ? RenewioTheme.accent.opacity(0.55)
+                                    : RenewioTheme.border,
+                                lineWidth: 1
+                            )
+                    )
+
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(
+                        configuration.isOn
+                            ? RenewioTheme.accentForeground
+                            : RenewioTheme.foreground.opacity(isEnabled ? 0.85 : 0.4)
+                    )
+                    .frame(width: knobWidth, height: knobHeight)
+                    .padding(inset)
+                    .shadow(color: Color.black.opacity(0.25), radius: 1, y: 0.5)
+            }
+            .frame(width: trackWidth, height: trackHeight)
+            .brightness(isHovered && isEnabled ? 0.04 : 0)
+        }
+        .buttonStyle(RenewioPressButtonStyle())
+        .disabled(!isEnabled)
+        .focused($isFocused)
+        .interactiveHover($isHovered, enabled: isEnabled)
+        .renewioFocusRing(isFocused: isFocused && isEnabled, cornerRadius: RenewioTheme.radiusSm)
+        .animation(RenewioMotion.hover, value: configuration.isOn)
+        .animation(RenewioMotion.hover, value: isHovered)
+    }
+}

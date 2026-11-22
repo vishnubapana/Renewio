@@ -235,7 +235,7 @@ enum DeviceDiscovery {
         return nil
     }
 
-    private static func parseDevices(jsonText: String) throws -> [AppleDevice] {
+    static func parseDevices(jsonText: String) throws -> [AppleDevice] {
         guard let data = jsonText.data(using: .utf8),
               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [] }

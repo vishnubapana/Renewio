@@ -13,8 +13,11 @@ struct MenuPopoverView: View {
                 emptyAppsPrompt
             } else {
                 appList
+                if case let .batchSummary(succeeded, failed) = model.renewRunner.status {
+                    batchSummaryCard(succeeded: succeeded, failed: failed)
+                }
                 if installs.count > 1 {
-                    renewAllButton
+                    renewAllRow
                 }
             }
         }
@@ -93,7 +96,7 @@ struct MenuPopoverView: View {
             Text("No apps on this device")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(RenewioTheme.foreground)
-            Text("Add a GitHub-sourced app in Settings to track and renew it here.")
+            Text("Add a GitHub repo or drop a local .ipa in Settings to track and renew it here.")
                 .font(.system(size: 12))
                 .foregroundStyle(RenewioTheme.mutedForeground)
             Button("Add app in Settings") { model.openOnboarding() }
@@ -129,19 +132,85 @@ struct MenuPopoverView: View {
         }
     }
 
-    private var renewAllButton: some View {
-        Button {
-            model.renewAllOnSelectedDevice()
-        } label: {
-            LoadingLabel(
-                title: model.renewRunner.isRunning ? "Renewing…" : "Renew all",
-                isLoading: model.renewRunner.isRunning
-            )
-            .font(.system(size: 13, weight: .semibold))
-            .frame(maxWidth: .infinity)
+    private var renewAllRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                model.renewAllOnSelectedDevice()
+            } label: {
+                LoadingLabel(
+                    title: model.renewRunner.isRunning ? "Renewing…" : "Renew all",
+                    isLoading: model.renewRunner.isRunning
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .disabled(model.renewRunner.isRunning)
+
+            if model.renewRunner.isRunning {
+                Button {
+                    model.renewRunner.cancel()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(RenewioTheme.danger)
+                        .frame(width: 34, height: 34)
+                        .background(RenewioTheme.danger.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                                .stroke(RenewioTheme.danger.opacity(0.35), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(RenewioPressButtonStyle())
+                .help("Cancel renew")
+            }
         }
-        .buttonStyle(SecondaryButtonStyle())
-        .disabled(model.renewRunner.isRunning)
+    }
+
+    private func batchSummaryCard(succeeded: [String], failed: [BatchFailure]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(
+                    failed.isEmpty ? "All apps renewed" : "Renew all finished",
+                    systemImage: failed.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                )
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(failed.isEmpty ? RenewioTheme.success : RenewioTheme.accent)
+                Spacer()
+                Button {
+                    model.renewRunner.clearStatus()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                }
+                .buttonStyle(RenewioPressButtonStyle())
+                .help("Dismiss")
+            }
+
+            if !succeeded.isEmpty {
+                Text("Succeeded: \(succeeded.joined(separator: ", "))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(RenewioTheme.foreground)
+            }
+            ForEach(failed) { item in
+                Text("Failed (\(item.appName)): \(item.message)")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(RenewioTheme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            CardSurface(
+                fill: (failed.isEmpty ? RenewioTheme.success : RenewioTheme.accent).opacity(0.08),
+                border: (failed.isEmpty ? RenewioTheme.success : RenewioTheme.accent).opacity(0.3),
+                cornerRadius: RenewioTheme.radiusLg
+            )
+        )
+        .transition(.renewioExpandCollapse)
     }
 }
 
@@ -199,6 +268,9 @@ private struct AppInstallCard: View {
     @EnvironmentObject private var model: AppModel
     let install: TrackedAppInstall
 
+    @State private var isCardHovered = false
+    @State private var copiedLog = false
+
     private var isActive: Bool {
         model.renewRunner.activeInstallID == install.id
     }
@@ -207,11 +279,19 @@ private struct AppInstallCard: View {
         isActive && model.renewRunner.isRunning
     }
 
+    private var availableUpdate: ReleaseOption? {
+        model.availableUpdates[install.id]
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            let state = RefreshCountdownState.make(expiresAt: install.expiresAt, now: context.date)
+            let state = RefreshCountdownState.make(
+                expiresAt: install.expiresAt,
+                signingDuration: install.signingDuration,
+                now: context.date
+            )
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 10) {
+                HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Text(install.name)
@@ -222,6 +302,22 @@ private struct AppInstallCard: View {
                                 Text(version)
                                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                                     .foregroundStyle(RenewioTheme.mutedForeground)
+                            }
+                            if let update = availableUpdate {
+                                Button {
+                                    model.renew(install: install)
+                                } label: {
+                                    Text("↑ \(update.displayVersion)")
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(RenewioTheme.accent)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(RenewioTheme.accent.opacity(0.14))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(RenewioPressButtonStyle())
+                                .disabled(model.renewRunner.isRunning)
+                                .help("Update available: \(update.displayVersion). Click to install.")
                             }
                             Spacer(minLength: 0)
                         }
@@ -252,6 +348,12 @@ private struct AppInstallCard: View {
                                 }
                             }
                             .frame(height: 2)
+                        } else if install.isLocalIPA {
+                            Text("Local · \(install.sourceLabel)")
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(RenewioTheme.mutedForeground)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         } else if let tag = install.selectedTag, !tag.isEmpty {
                             Text("Pinned \(tag)")
                                 .font(.system(size: 9.5, design: .monospaced))
@@ -261,11 +363,29 @@ private struct AppInstallCard: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    RenewIconButton(
-                        isRunning: isRunningThis,
-                        disabled: model.renewRunner.isRunning
-                    ) {
-                        model.renew(install: install)
+                    if isCardHovered && !isRunningThis {
+                        PopoverIconButton(
+                            systemImage: "pencil",
+                            iconSize: 10,
+                            side: 24,
+                            hoverTint: RenewioTheme.accent,
+                            helpText: "Edit \(install.name)",
+                            action: { model.openOnboarding(editingInstallID: install.id) }
+                        )
+                        .transition(.opacity)
+                    }
+
+                    if isRunningThis {
+                        CancelIconButton {
+                            model.renewRunner.cancel()
+                        }
+                    } else {
+                        RenewIconButton(
+                            isRunning: isRunningThis,
+                            disabled: model.renewRunner.isRunning
+                        ) {
+                            model.renew(install: install)
+                        }
                     }
                 }
 
@@ -276,6 +396,11 @@ private struct AppInstallCard: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(CardSurface())
+            .onHover { hovering in
+                withAnimation(RenewioMotion.hover) {
+                    isCardHovered = hovering
+                }
+            }
         }
     }
 
@@ -286,6 +411,7 @@ private struct AppInstallCard: View {
         case .running(let stage, _): return "running-\(stage?.rawValue ?? "none")"
         case .success: return "success"
         case .failure: return "failure"
+        case .batchSummary: return "batch"
         }
     }
 
@@ -295,20 +421,48 @@ private struct AppInstallCard: View {
             switch model.renewRunner.status {
             case let .running(stage, detail):
                 VStack(alignment: .leading, spacing: 6) {
-                    ProgressView(value: progressValue(for: stage)) {
-                        Text(detail)
-                            .font(.system(size: 11))
-                            .foregroundStyle(RenewioTheme.mutedForeground)
+                    if stage == .download, let dl = model.renewRunner.downloadProgress {
+                        ProgressView(value: dl.fraction) {
+                            HStack {
+                                Text(detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(RenewioTheme.mutedForeground)
+                                Spacer()
+                                Text(dl.formattedLabel)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(RenewioTheme.accent)
+                            }
+                        }
+                        .progressViewStyle(.linear)
+                        .tint(RenewioTheme.accent)
+                    } else {
+                        ProgressView(value: progressValue(for: stage)) {
+                            Text(detail)
+                                .font(.system(size: 11))
+                                .foregroundStyle(RenewioTheme.mutedForeground)
+                        }
+                        .progressViewStyle(.linear)
+                        .tint(RenewioTheme.accent)
                     }
-                    .progressViewStyle(.linear)
-                    .tint(RenewioTheme.accent)
                 }
                 .transition(.renewioExpandCollapse)
-            case let .success(version, deviceName, detail, _, _):
+            case let .success(version, deviceName, detail, _, _, _):
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Success", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(RenewioTheme.success)
+                    HStack {
+                        Label("Success", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(RenewioTheme.success)
+                        Spacer()
+                        Button {
+                            model.renewRunner.clearStatus()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(RenewioTheme.mutedForeground)
+                        }
+                        .buttonStyle(RenewioPressButtonStyle())
+                        .help("Dismiss")
+                    }
                     Text("\(version) on \(deviceName)")
                         .font(.system(size: 11))
                         .foregroundStyle(RenewioTheme.foreground)
@@ -319,9 +473,21 @@ private struct AppInstallCard: View {
                 .transition(.renewioExpandCollapse)
             case let .failure(_, message):
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Failed", systemImage: "xmark.octagon.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(RenewioTheme.danger)
+                    HStack {
+                        Label("Failed", systemImage: "xmark.octagon.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(RenewioTheme.danger)
+                        Spacer()
+                        Button {
+                            model.renewRunner.clearStatus()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(RenewioTheme.mutedForeground)
+                        }
+                        .buttonStyle(RenewioPressButtonStyle())
+                        .help("Dismiss")
+                    }
                     Text(message)
                         .font(.system(size: 11))
                         .foregroundStyle(RenewioTheme.foreground)
@@ -341,16 +507,28 @@ private struct AppInstallCard: View {
                         Button {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(errorLog, forType: .string)
+                            withAnimation(RenewioMotion.hover) {
+                                copiedLog = true
+                            }
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                withAnimation(RenewioMotion.hover) {
+                                    copiedLog = false
+                                }
+                            }
                         } label: {
-                            Label("Copy log", systemImage: "doc.on.doc")
-                                .font(.system(size: 10.5, weight: .medium))
+                            Label(
+                                copiedLog ? "Copied" : "Copy log",
+                                systemImage: copiedLog ? "checkmark" : "doc.on.doc"
+                            )
+                            .font(.system(size: 10.5, weight: .medium))
                         }
                         .buttonStyle(RenewioPressButtonStyle())
-                        .foregroundStyle(RenewioTheme.mutedForeground)
+                        .foregroundStyle(copiedLog ? RenewioTheme.success : RenewioTheme.mutedForeground)
                     }
                 }
                 .transition(.renewioExpandCollapse)
-            case .idle:
+            case .idle, .batchSummary:
                 EmptyView()
             }
         }
@@ -365,6 +543,45 @@ private struct AppInstallCard: View {
     private func progressValue(for stage: RenewStage?) -> Double {
         guard let stage, let idx = RenewStage.allCases.firstIndex(of: stage) else { return 0.08 }
         return Double(idx + 1) / Double(RenewStage.allCases.count)
+    }
+}
+
+private struct CancelIconButton: View {
+    let action: () -> Void
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if isHovered || isFocused {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(RenewioTheme.danger)
+                } else {
+                    InlineSpinner(tint: RenewioTheme.accentForeground)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(
+                (isHovered || isFocused)
+                    ? RenewioTheme.danger.opacity(0.18)
+                    : RenewioTheme.accent
+            )
+            .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous)
+                    .stroke(
+                        (isHovered || isFocused) ? RenewioTheme.danger.opacity(0.5) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(RenewioPressButtonStyle())
+        .help("Cancel renew")
+        .focused($isFocused)
+        .interactiveHover($isHovered)
+        .renewioFocusRing(isFocused: isFocused, cornerRadius: RenewioTheme.radiusMd)
     }
 }
 
@@ -426,7 +643,11 @@ struct RefreshCountdownState {
     let tint: Color
     let showProgressBar: Bool
 
-    static func make(expiresAt: Date?, now: Date) -> RefreshCountdownState {
+    static func make(
+        expiresAt: Date?,
+        signingDuration: TimeInterval = TrackedAppInstall.signingLifetime,
+        now: Date
+    ) -> RefreshCountdownState {
         guard let expiresAt else {
             return RefreshCountdownState(
                 statusLabel: "Not installed",
@@ -452,7 +673,8 @@ struct RefreshCountdownState {
             )
         }
 
-        let fraction = min(1, max(0, remaining / TrackedAppInstall.signingLifetime))
+        let effectiveDuration = max(3600, signingDuration)
+        let fraction = min(1, max(0, remaining / effectiveDuration))
         let totalMinutes = Int(remaining / 60)
         let days = totalMinutes / (24 * 60)
         let hours = (totalMinutes % (24 * 60)) / 60

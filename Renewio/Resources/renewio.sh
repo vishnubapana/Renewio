@@ -2,9 +2,10 @@
 # Renewio renew pipeline — Apple-native CLI only.
 # Emits structured lines for the menu bar app:
 #   [STAGE] name|human label
+#   [PROGRESS] stage|percent|downloadedBytes|totalBytes
 #   [INFO] message
 #   [ERROR] stage|human message
-#   [RESULT] ok|version|deviceName|detail
+#   [RESULT] ok|version|deviceName|detail|expiresAtISO
 set -euo pipefail
 
 REPO="${GITHUB_REPO:-bobsupra/NuvioTVOS}"
@@ -54,9 +55,11 @@ TEAM_ID="${RENEWIO_TEAM_ID:-}"
 BUNDLE_ID="${RENEWIO_BUNDLE_ID:-}"
 DEVICE_ID="${RENEWIO_DEVICE_ID:-}"
 DEVICE_NAME="${RENEWIO_DEVICE_NAME:-}"
+APP_NAME="${RENEWIO_APP_NAME:-}"
 SELECTED_IPA="${RENEWIO_IPA:-}"
 SELECTED_TAG="${RENEWIO_TAG:-}"
 MAX_CACHED_IPAS="${RENEWIO_MAX_CACHED_IPAS:-3}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 DRY_RUN=0
 SKIP_INSTALL=0
 NO_CONFIG_WRITE=0
@@ -70,9 +73,10 @@ Options:
   --bundle-id ID        Product bundle identifier to install as
   --device-id ID        Device identifier for devicectl
   --device-name NAME    Human-readable device name
+  --app-name NAME       Human-readable app name for logs/results
   --repo OWNER/NAME     GitHub repository for IPA releases (default: bobsupra/NuvioTVOS)
   --platform PLATFORM   tvos|ios (default: tvos)
-  --ipa FILE            Use a specific cached IPA filename/path instead of fetching latest
+  --ipa FILE            Use a specific local/cached IPA filename/path instead of fetching latest
   --tag TAG             Install a specific GitHub release tag (uses cache if already downloaded)
   --config PATH         Config JSON (default: ~/Library/Application Support/Renewio/config.json)
   --no-config-write     Do not update config.json after success (app owns v2 schema)
@@ -88,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --bundle-id) BUNDLE_ID="$2"; shift 2 ;;
     --device-id) DEVICE_ID="$2"; shift 2 ;;
     --device-name) DEVICE_NAME="$2"; shift 2 ;;
+    --app-name) APP_NAME="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
     --ipa) SELECTED_IPA="$2"; shift 2 ;;
@@ -108,7 +113,7 @@ case "$PLATFORM" in
   *) echo "[ERROR] args|Unknown platform: $PLATFORM (use tvos or ios)"; exit 2 ;;
 esac
 
-REPO_FOLDER="$(echo "$REPO" | tr '/ ' '__-')"
+REPO_FOLDER="$(echo "${REPO:-local}" | tr '/ ' '__-')"
 DOWNLOAD_DIR="$SUPPORT_DIR/downloads/$REPO_FOLDER"
 # Migrate legacy flat downloads for the default Nuvio repo.
 if [[ "$REPO" == "bobsupra/NuvioTVOS" && -d "$SUPPORT_DIR/downloads" ]]; then
@@ -140,6 +145,18 @@ else
 fi
 LOG_FILE="$LOG_DIR/renew.log"
 STATUS_FILE="$SUPPORT_DIR/last-status.txt"
+PROFILE_EXPIRES_AT=""
+
+# Rotate renew.log if it grows past 2 MB.
+rotate_log_if_needed() {
+  [[ -f "$LOG_FILE" ]] || return 0
+  local size
+  size="$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)"
+  if [[ "$size" -gt 2097152 ]]; then
+    mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
+  fi
+}
+rotate_log_if_needed
 
 # Agent/UI stdout pipes can close during long quiet stretches (xcodebuild).
 # Ignore SIGPIPE so a closed stdout does not abort the install mid-flight.
@@ -182,7 +199,6 @@ fail() {
 }
 
 json_get() {
-  # json_get <file> <python-ish key path using jq>
   local file="$1"
   local query="$2"
   if [[ ! -f "$file" ]]; then
@@ -194,8 +210,6 @@ json_get() {
 
 load_config() {
   if [[ -f "$CONFIG_PATH" ]]; then
-    # Use if/fi (not `[[ ]] &&`) so a false test does not make this function
-    # return 1 under `set -e` and abort the whole renew run.
     if [[ -z "$TEAM_ID" ]]; then TEAM_ID="$(json_get "$CONFIG_PATH" '.teamID')"; fi
     if [[ -z "$BUNDLE_ID" ]]; then BUNDLE_ID="$(json_get "$CONFIG_PATH" '.bundleID')"; fi
     if [[ -z "$DEVICE_ID" ]]; then DEVICE_ID="$(json_get "$CONFIG_PATH" '.deviceID')"; fi
@@ -229,7 +243,7 @@ humanize_device_error() {
   if echo "$raw" | grep -qiE 'timed out|CoreDeviceService'; then
     echo "Could not talk to Apple's device service. Make sure Xcode is installed and try again in a few seconds."
   elif echo "$raw" | grep -qiE 'not found|No devices|empty'; then
-    echo "${DEVICE_KIND} not found. Pair it in Xcode → Window → Devices and Simulators, keep it awake, then update credentials in Renewio."
+    echo "${DEVICE_KIND} not found. Pair it in Xcode → Window → Devices and Simulators, keep it awake, then update Settings in Renewio."
   elif echo "$raw" | grep -qiE 'offline|unavailable|not connected'; then
     echo "${DEVICE_KIND} is offline or asleep. Wake it, confirm it is paired in Xcode, then retry."
   else
@@ -252,10 +266,9 @@ check_device() {
   fi
 
   local match
-  match="$(python3 - <<PY
+  match="$(python3 - "$json_out" "$DEVICE_ID" <<'PY'
 import json, sys
-path = r'''$json_out'''
-needle = r'''$DEVICE_ID'''
+path, needle = sys.argv[1], sys.argv[2]
 with open(path) as f:
     data = json.load(f)
 devices = data.get("result", {}).get("devices") or data.get("devices") or []
@@ -263,7 +276,6 @@ for d in devices:
     props = d.get("deviceProperties") or {}
     hw = d.get("hardwareProperties") or {}
     conn = d.get("connectionProperties") or {}
-    # Newer schema nests under properties
     nested = d.get("properties") or {}
     identifiers = [
         d.get("identifier"),
@@ -284,12 +296,10 @@ for d in devices:
     blob = " ".join(str(x) for x in identifiers + names if x)
     if needle and (needle in blob or any(str(x) == needle for x in identifiers if x)):
         name = next((n for n in names if n), needle)
-        # Prefer a concrete install identifier
         udid = hw.get("udid") or props.get("identifier") or d.get("identifier") or needle
         nested_conn = nested.get("connection") if isinstance(nested.get("connection"), dict) else {}
         pairing = conn.get("pairingState") or nested_conn.get("pairingState") or ""
         tunnel = conn.get("tunnelState") or nested_conn.get("state") or nested_conn.get("tunnelState") or ""
-        # Prefer pairing for readiness; idle wireless tunnels often look "disconnected".
         state = pairing or tunnel or "unknown"
         if pairing.lower() == "paired" and tunnel.lower() in ("disconnected", ""):
             state = "paired"
@@ -310,8 +320,6 @@ PY
   DEVICE_NAME="${DEVICE_NAME:-$resolved_name}"
   info "Found ${DEVICE_KIND} '${DEVICE_NAME}' (${DEVICE_ID}), list_state=${resolved_state}"
 
-  # Idle wireless Apple TVs often report tunnelState=disconnected in `list devices`
-  # even when paired. Probe details to wake the CoreDevice tunnel before install.
   local details_err="$WORK_DIR/device-details.err"
   local details_json="$WORK_DIR/device-details.json"
   set +e
@@ -324,10 +332,10 @@ PY
 
   local live_state=""
   if [[ $details_rc -eq 0 && -f "$details_json" ]]; then
-    live_state="$(python3 - <<PY
-import json
+    live_state="$(python3 - "$details_json" <<'PY'
+import json, sys
 from pathlib import Path
-data = json.loads(Path(r'''$details_json''').read_text())
+data = json.loads(Path(sys.argv[1]).read_text())
 device = data.get("result") or data
 conn = (device.get("connectionProperties") or {})
 nested = ((device.get("properties") or {}).get("connection") or {})
@@ -340,8 +348,6 @@ PY
     info "Could not probe device details yet: $(tr '\n' ' ' < "$details_err" 2>/dev/null | cut -c1-200)"
   fi
 
-  # Only hard-fail when clearly unpaired/unavailable. "disconnected" on the list
-  # is normal for a sleeping wireless tunnel and is recovered by the probe above.
   if echo "${live_state:-$resolved_state}" | grep -qiE 'unpaired|unavailable|offline'; then
     fail "${DEVICE_KIND} '${DEVICE_NAME}' is ${live_state:-$resolved_state}. Wake it, confirm it is paired in Xcode, then retry."
   fi
@@ -356,18 +362,25 @@ fetch_release() {
   local api="https://api.github.com/repos/${REPO}/releases?per_page=20"
   local json="$WORK_DIR/releases.json"
   local http
+  local curl_headers=(-H "Accept: application/vnd.github+json" -H "User-Agent: Renewio")
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    curl_headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
   set +e
-  http=$(curl -sS -L -o "$json" -w "%{http_code}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "User-Agent: Renewio" \
-    "$api")
+  http=$(curl -sS -L -o "$json" -w "%{http_code}" "${curl_headers[@]}" "$api")
   local rc=$?
   set -e
   if [[ $rc -ne 0 || "$http" != "200" ]]; then
-    fail "Could not reach GitHub releases (HTTP ${http:-n/a}). Check your network and try again."
+    if [[ "$http" == "403" || "$http" == "429" ]]; then
+      fail "GitHub API rate limit reached (HTTP ${http}). Add a GitHub token in Settings or try again later."
+    elif [[ "$http" == "404" ]]; then
+      fail "GitHub repository '${REPO}' not found (HTTP 404). If it is private, add a GitHub token in Settings."
+    else
+      fail "Could not reach GitHub releases (HTTP ${http:-n/a}). Check your network and try again."
+    fi
   fi
 
-  python3 - <<'PY' "$json" "$WORK_DIR/asset.tsv" "$SELECTED_TAG"
+  python3 - "$json" "$WORK_DIR/asset.tsv" "$SELECTED_TAG" <<'PY'
 import json, sys, re
 path, out, wanted_tag = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f:
@@ -382,7 +395,6 @@ for rel in releases:
     ipas = unsigned or [a for a in assets if a.get("name", "").lower().endswith(".ipa")]
     if not ipas:
         continue
-    # Prefer unsigned
     ipas.sort(key=lambda a: (0 if "unsigned" in a["name"].lower() else 1, a["name"]))
     chosen, asset = rel, ipas[0]
     break
@@ -391,44 +403,45 @@ if not chosen:
     sys.exit(1)
 tag = chosen.get("tag_name") or ""
 name = asset["name"]
-url = asset["browser_download_url"]
+# Use API asset URL when authenticated so private repo assets download cleanly.
+api_url = asset.get("url") or ""
+browser_url = asset["browser_download_url"]
 size = asset.get("size") or 0
-# Derive a friendly version
 m = re.search(r"(\d+\.\d+\.\d+)", name) or re.search(r"(\d+\.\d+\.\d+)", tag)
 version = m.group(1) if m else tag
 with open(out, "w") as f:
-    f.write(f"{tag}\t{version}\t{name}\t{url}\t{size}\n")
+    f.write(f"{tag}\t{version}\t{name}\t{browser_url}\t{api_url}\t{size}\n")
 print(f"{tag} / {version} / {name}")
 PY
 
-  IFS=$'\t' read -r RELEASE_TAG RELEASE_VERSION ASSET_NAME ASSET_URL ASSET_SIZE < "$WORK_DIR/asset.tsv"
+  IFS=$'\t' read -r RELEASE_TAG RELEASE_VERSION ASSET_NAME ASSET_URL ASSET_API_URL ASSET_SIZE < "$WORK_DIR/asset.tsv"
   info "Latest release: ${RELEASE_TAG} (${ASSET_NAME})"
 }
 
 use_cached_ipa() {
-  stage "release" "Using cached version"
+  stage "release" "Using local IPA"
   if [[ "$SELECTED_IPA" == */* ]]; then
     IPA_PATH="$SELECTED_IPA"
   else
     IPA_PATH="$DOWNLOAD_DIR/$SELECTED_IPA"
   fi
-  [[ -f "$IPA_PATH" ]] || fail "Cached IPA not found: ${SELECTED_IPA}"
+  [[ -f "$IPA_PATH" ]] || fail "IPA file not found: ${SELECTED_IPA}"
   ASSET_NAME="$(basename "$IPA_PATH")"
-  RELEASE_VERSION="$(python3 - <<'PY' "$ASSET_NAME"
+  RELEASE_VERSION="$(python3 - "$ASSET_NAME" <<'PY'
 import re, sys
 name = sys.argv[1]
 m = re.search(r"(\d+\.\d+\.\d+)", name)
 print(m.group(1) if m else name.removesuffix(".ipa"))
 PY
 )"
-  RELEASE_TAG="cached-${RELEASE_VERSION}"
+  RELEASE_TAG="local-${RELEASE_VERSION}"
   touch "$IPA_PATH" 2>/dev/null || true
-  stage "download" "Using cached ${ASSET_NAME}"
-  info "Selected cached IPA: ${ASSET_NAME} (v${RELEASE_VERSION})"
+  stage "download" "Using ${ASSET_NAME}"
+  info "Selected local IPA: ${ASSET_NAME} (v${RELEASE_VERSION})"
 }
 
 prune_cached_ipas() {
-  python3 - <<'PY' "$DOWNLOAD_DIR" "$MAX_CACHED_IPAS" "${IPA_PATH:-}"
+  python3 - "$DOWNLOAD_DIR" "$MAX_CACHED_IPAS" "${IPA_PATH:-}" <<'PY'
 import pathlib, sys
 download_dir = pathlib.Path(sys.argv[1])
 keep = max(1, int(sys.argv[2]))
@@ -468,12 +481,37 @@ download_ipa() {
   fi
   info "Downloading ${ASSET_NAME} (${ASSET_SIZE} bytes)"
   local tmp="$IPA_PATH.partial"
-  if ! curl -sS -L --fail -o "$tmp" \
-      -H "User-Agent: Renewio" \
-      -H "Accept: application/octet-stream" \
-      "$ASSET_URL"; then
+  rm -f "$tmp"
+
+  local download_url="$ASSET_URL"
+  local curl_headers=(-H "User-Agent: Renewio" -H "Accept: application/octet-stream")
+  if [[ -n "$GITHUB_TOKEN" && -n "${ASSET_API_URL:-}" ]]; then
+    download_url="$ASSET_API_URL"
+    curl_headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+
+  curl -sS -L --fail -o "$tmp" "${curl_headers[@]}" "$download_url" &
+  local curl_pid=$!
+
+  if [[ "${ASSET_SIZE:-0}" -gt 0 ]]; then
+    while kill -0 "$curl_pid" 2>/dev/null; do
+      if [[ -f "$tmp" ]]; then
+        local cur_bytes
+        cur_bytes="$(stat -f%z "$tmp" 2>/dev/null || echo 0)"
+        local pct=$(( cur_bytes * 100 / ASSET_SIZE ))
+        if [[ "$pct" -gt 100 ]]; then pct=100; fi
+        emit "[PROGRESS] download|${pct}|${cur_bytes}|${ASSET_SIZE}"
+      fi
+      sleep 0.35
+    done
+  fi
+
+  if ! wait "$curl_pid"; then
     rm -f "$tmp"
     fail "Download failed for ${ASSET_NAME}. Check your network and retry."
+  fi
+  if [[ "${ASSET_SIZE:-0}" -gt 0 ]]; then
+    emit "[PROGRESS] download|100|${ASSET_SIZE}|${ASSET_SIZE}"
   fi
   mv -f "$tmp" "$IPA_PATH"
   prune_cached_ipas
@@ -481,10 +519,9 @@ download_ipa() {
 
 refresh_signing() {
   stage "provision" "Refreshing signing profile"
-  [[ -n "$TEAM_ID" ]] || fail "No Team ID configured. Open Setup / Update Credentials and set your Xcode Team ID."
-  [[ -n "$BUNDLE_ID" ]] || fail "No Bundle ID configured. Open Setup / Update Credentials."
+  [[ -n "$TEAM_ID" ]] || fail "No Team ID configured. Open Settings and set your Xcode Team ID."
+  [[ -n "$BUNDLE_ID" ]] || fail "No Bundle ID configured. Open Settings."
 
-  # Ensure a development identity exists or will be created by xcodebuild.
   local identities
   identities="$(security find-identity -v -p codesigning 2>/dev/null | grep -E 'Apple Development|iPhone Developer|Apple Distribution' || true)"
   if [[ -z "$identities" ]]; then
@@ -535,32 +572,48 @@ refresh_signing() {
   STUB_PROVISION="$STUB_APP/embedded.mobileprovision"
   [[ -f "$STUB_PROVISION" ]] || fail "No embedded.mobileprovision in stub app. Ensure automatic signing works for Team ${TEAM_ID}."
 
-  # Extract signing identity from codesign of the stub.
+  # Decode provisioning profile to read the real ExpirationDate (7 days for free, 365 days for paid).
+  local profile_plist="$WORK_DIR/profile.plist"
+  if security cms -D -i "$STUB_PROVISION" > "$profile_plist" 2>/dev/null; then
+    PROFILE_EXPIRES_AT="$(python3 - "$profile_plist" <<'PY'
+import datetime, pathlib, plistlib, sys
+try:
+    prof = plistlib.loads(pathlib.Path(sys.argv[1]).read_bytes())
+    exp = prof.get("ExpirationDate")
+    if isinstance(exp, datetime.datetime):
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=datetime.timezone.utc)
+        print(exp.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+except Exception:
+    pass
+PY
+)" || true
+    if [[ -n "$PROFILE_EXPIRES_AT" ]]; then
+      info "Profile expires at: ${PROFILE_EXPIRES_AT}"
+    fi
+  fi
+
   SIGN_IDENTITY="$(codesign -dv --verbose=4 "$STUB_APP" 2>&1 | awk -F'= ' '/Authority=Apple Development|Authority=iPhone Developer/{print $2; exit}')"
   if [[ -z "$SIGN_IDENTITY" ]]; then
     SIGN_IDENTITY="$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development|iPhone Developer/{print $2; exit}')"
   fi
   [[ -n "$SIGN_IDENTITY" ]] || fail "Could not find an Apple Development signing identity after the stub build."
 
-  # Entitlements from the stub (already matched to the profile).
   ENTITLEMENTS_PATH="$WORK_DIR/entitlements.plist"
   rm -f "$ENTITLEMENTS_PATH"
-  # Leading colon tells codesign to write the extracted entitlements to this path.
   codesign -d --entitlements ":$ENTITLEMENTS_PATH" "$STUB_APP" 2>/dev/null || true
   if [[ ! -s "$ENTITLEMENTS_PATH" ]]; then
-    # Fallback: build a minimal entitlement set from the provision.
-    security cms -D -i "$STUB_PROVISION" > "$WORK_DIR/profile.plist" 2>/dev/null \
+    [[ -s "$profile_plist" ]] || security cms -D -i "$STUB_PROVISION" > "$profile_plist" 2>/dev/null \
       || fail "Could not decode the provisioning profile."
-    python3 - <<PY
-import plistlib, pathlib
-prof = plistlib.loads(pathlib.Path(r'''$WORK_DIR/profile.plist''').read_bytes())
+    python3 - "$profile_plist" "$ENTITLEMENTS_PATH" <<'PY'
+import plistlib, pathlib, sys
+prof = plistlib.loads(pathlib.Path(sys.argv[1]).read_bytes())
 ents = prof.get("Entitlements") or {}
-# Keep only safe keys for a free Personal Team install.
 keep = {}
 for k in ("application-identifier", "com.apple.developer.team-identifier", "get-task-allow", "keychain-access-groups"):
     if k in ents:
         keep[k] = ents[k]
-pathlib.Path(r'''$ENTITLEMENTS_PATH''').write_bytes(plistlib.dumps(keep))
+pathlib.Path(sys.argv[2]).write_bytes(plistlib.dumps(keep))
 PY
   fi
 
@@ -577,25 +630,21 @@ resign_app() {
   APP_PATH="$(find "$extract/Payload" -maxdepth 1 -name '*.app' -type d | head -1 || true)"
   [[ -n "$APP_PATH" ]] || fail "IPA did not contain a Payload/*.app bundle."
 
-  # Drop Top Shelf extension — free Personal Team profiles are for the main app only.
   if [[ -d "$APP_PATH/PlugIns" ]]; then
-    info "Removing PlugIns (Top Shelf) so a single app provisioning profile can be used."
+    info "Removing PlugIns so a single app provisioning profile can be used."
     rm -rf "$APP_PATH/PlugIns"
   fi
 
-  # Patch Info.plist
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}" "$APP_PATH/Info.plist" \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string ${BUNDLE_ID}" "$APP_PATH/Info.plist"
   if /usr/libexec/PlistBuddy -c "Print :BGTaskSchedulerPermittedIdentifiers" "$APP_PATH/Info.plist" >/dev/null 2>&1; then
     /usr/libexec/PlistBuddy -c "Delete :BGTaskSchedulerPermittedIdentifiers" "$APP_PATH/Info.plist" || true
   fi
 
-  # Clear old signature + provision
   rm -rf "$APP_PATH/_CodeSignature"
   rm -f "$APP_PATH/embedded.mobileprovision"
   cp "$STUB_PROVISION" "$APP_PATH/embedded.mobileprovision"
 
-  # Sign nested Mach-O frameworks inside-out.
   while IFS= read -r -d '' fw; do
     rm -rf "$fw/_CodeSignature"
     if ! codesign -f -s "$SIGN_IDENTITY" --timestamp=none "$fw" 2>"$WORK_DIR/codesign.err"; then
@@ -609,13 +658,14 @@ resign_app() {
     fi
   done < <(find "$APP_PATH" -name '*.dylib' -print0 2>/dev/null || true)
 
-  # Sign the app with stub entitlements.
+  local app_bundle_name
+  app_bundle_name="$(basename "$APP_PATH")"
   if ! codesign -f -s "$SIGN_IDENTITY" \
       --entitlements "$ENTITLEMENTS_PATH" \
       --timestamp=none \
       --generate-entitlement-der \
       "$APP_PATH" 2>"$WORK_DIR/codesign.err"; then
-    fail "Failed to sign NuvioTV.app: $(tr '\n' ' ' < "$WORK_DIR/codesign.err")"
+    fail "Failed to sign ${app_bundle_name}: $(tr '\n' ' ' < "$WORK_DIR/codesign.err")"
   fi
 
   if ! codesign --verify --deep --strict "$APP_PATH" 2>"$WORK_DIR/codesign.err"; then
@@ -626,7 +676,7 @@ resign_app() {
 }
 
 install_app() {
-  stage "install" "Installing on Apple TV"
+  stage "install" "Installing on ${DEVICE_NAME:-$DEVICE_KIND}"
   local json_out="$WORK_DIR/install.json"
   local err_out="$WORK_DIR/install.err"
   set +e
@@ -640,11 +690,11 @@ install_app() {
     local combined
     combined="$(cat "$err_out" 2>/dev/null; cat "$WORK_DIR/install.txt" 2>/dev/null; cat "$json_out" 2>/dev/null)"
     if echo "$combined" | grep -qiE 'offline|not connected|unavailable|sleep|timeout|Connection'; then
-      fail "Install failed because the Apple TV became unreachable. Wake '${DEVICE_NAME}', keep it on the network, then retry."
+      fail "Install failed because ${DEVICE_NAME:-$DEVICE_KIND} became unreachable. Wake it, keep it on the network, then retry."
     elif echo "$combined" | grep -qiE 'provision|sign|validat|profile|entitlement'; then
-      fail "Install rejected due to signing/profile mismatch. Update Credentials, ensure the Apple TV is registered to your team, then retry."
+      fail "Install rejected due to signing/profile mismatch. Confirm your Team ID in Settings and ensure ${DEVICE_NAME:-$DEVICE_KIND} is registered to your team, then retry."
     elif echo "$combined" | grep -qiE 'disk|space|full'; then
-      fail "Apple TV is out of storage. Free some space, then retry."
+      fail "${DEVICE_NAME:-$DEVICE_KIND} is out of storage. Free some space, then retry."
     else
       fail "Install failed: $(echo "$combined" | tr '\n' ' ' | cut -c1-300)"
     fi
@@ -660,29 +710,28 @@ write_success_state() {
   local now
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   mkdir -p "$SUPPORT_DIR"
-  # Legacy flat update only — used by CLI runs without the menu bar app.
-  python3 - <<PY
-import json, pathlib
-path = pathlib.Path(r'''$CONFIG_PATH''')
+  python3 - "$CONFIG_PATH" "$TEAM_ID" "$BUNDLE_ID" "$DEVICE_ID" "$DEVICE_NAME" "$RELEASE_VERSION" "$RELEASE_TAG" "$now" "$ASSET_NAME" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+team_id, bundle_id, device_id, device_name, version, tag, now, asset_name = sys.argv[2:10]
 data = {}
 if path.exists():
     try:
         data = json.loads(path.read_text())
     except Exception:
         data = {}
-# Never clobber a v2 multi-app config from the shell helper.
 if int(data.get("schemaVersion") or 0) >= 2 or data.get("installs"):
     print("skip-v2-config")
 else:
     data.update({
-        "teamID": r'''$TEAM_ID''',
-        "bundleID": r'''$BUNDLE_ID''',
-        "deviceID": r'''$DEVICE_ID''',
-        "deviceName": r'''$DEVICE_NAME''',
-        "lastInstalledVersion": r'''$RELEASE_VERSION''',
-        "lastInstalledTag": r'''$RELEASE_TAG''',
-        "lastInstalledAt": r'''$now''',
-        "lastAssetName": r'''$ASSET_NAME''',
+        "teamID": team_id,
+        "bundleID": bundle_id,
+        "deviceID": device_id,
+        "deviceName": device_name,
+        "lastInstalledVersion": version,
+        "lastInstalledTag": tag,
+        "lastInstalledAt": now,
+        "lastAssetName": asset_name,
     })
     path.write_text(json.dumps(data, indent=2) + "\n")
 PY
@@ -693,23 +742,23 @@ main() {
   require_tools
   load_config
 
-  [[ -n "$TEAM_ID" ]] || fail "Team ID missing. Complete onboarding first."
-  [[ -n "$BUNDLE_ID" ]] || fail "Bundle ID missing. Complete onboarding first."
-  [[ -n "$DEVICE_ID" ]] || fail "Apple TV not selected. Complete onboarding first."
+  [[ -n "$TEAM_ID" ]] || fail "Team ID missing. Complete Settings first."
+  [[ -n "$BUNDLE_ID" ]] || fail "Bundle ID missing. Complete Settings first."
+  [[ -n "$DEVICE_ID" ]] || fail "Device not selected. Complete Settings first."
 
   check_device
 
   if [[ -n "$SELECTED_IPA" ]]; then
     use_cached_ipa
     if [[ "$DRY_RUN" == "1" ]]; then
-      emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|dry-run ready (${ASSET_NAME})"
+      emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|dry-run ready (${ASSET_NAME})|"
       exit 0
     fi
   else
     fetch_release
 
     if [[ "$DRY_RUN" == "1" ]]; then
-      emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|dry-run ready (${ASSET_NAME})"
+      emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|dry-run ready (${ASSET_NAME})|"
       exit 0
     fi
 
@@ -720,13 +769,14 @@ main() {
   resign_app
 
   if [[ "$SKIP_INSTALL" == "1" ]]; then
-    emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|signed only (install skipped)"
+    emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|signed only (install skipped)|${PROFILE_EXPIRES_AT}"
     exit 0
   fi
 
   install_app
   write_success_state
-  emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|Nuvio TV ${RELEASE_VERSION} installed. Free profiles expire in about 7 days — click Renew again before then."
+  local display_app="${APP_NAME:-$(basename "${APP_PATH:-App}" .app)}"
+  emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|${display_app} ${RELEASE_VERSION} installed on ${DEVICE_NAME}.|${PROFILE_EXPIRES_AT}"
 }
 
 main "$@"

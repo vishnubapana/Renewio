@@ -23,25 +23,59 @@ enum RenewStage: String, CaseIterable, Identifiable {
     }
 }
 
+struct BatchFailure: Equatable, Identifiable {
+    let id = UUID()
+    let appName: String
+    let message: String
+}
+
 enum RenewStatus: Equatable {
     case idle
     case running(stage: RenewStage?, detail: String)
-    case success(version: String, deviceName: String, detail: String, tag: String?, assetName: String?)
+    case success(version: String, deviceName: String, detail: String, tag: String?, assetName: String?, expiresAt: String?)
     case failure(stage: String, message: String)
+    case batchSummary(succeeded: [String], failed: [BatchFailure])
+}
+
+struct DownloadProgress: Equatable {
+    let percent: Int
+    let downloadedBytes: Int64
+    let totalBytes: Int64
+
+    var fraction: Double {
+        guard totalBytes > 0 else { return Double(percent) / 100.0 }
+        return min(1, max(0, Double(downloadedBytes) / Double(totalBytes)))
+    }
+
+    var formattedLabel: String {
+        let have = ByteCountFormatter.string(fromByteCount: downloadedBytes, countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        return "\(percent)% · \(have) / \(total)"
+    }
 }
 
 @MainActor
 final class RenewRunner: ObservableObject {
     @Published private(set) var status: RenewStatus = .idle
+    @Published private(set) var downloadProgress: DownloadProgress?
     @Published private(set) var logTail: String = ""
     @Published private(set) var activeInstallID: UUID?
+
+    typealias SuccessCallback = (UUID, String, String?, String?, String?) -> Void
 
     private var process: Process?
     private let logURL: URL
     private var queue: [(install: TrackedAppInstall, device: TrackedDevice, teamID: String)] = []
+    private var currentInstallName: String = ""
     private var currentAssetName: String?
     private var currentTag: String?
-    private var onSuccess: ((UUID, String, String?, String?) -> Void)?
+    private var isBatchRun = false
+    private var batchSucceeded: [String] = []
+    private var batchFailed: [BatchFailure] = []
+    private var wasCancelled = false
+    private var onSuccess: SuccessCallback?
+
+    private static let maxLogBytes: UInt64 = 2 * 1024 * 1024
 
     init() {
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
@@ -59,9 +93,12 @@ final class RenewRunner: ObservableObject {
         install: TrackedAppInstall,
         device: TrackedDevice,
         teamID: String,
-        onSuccess: ((UUID, String, String?, String?) -> Void)? = nil
+        onSuccess: SuccessCallback? = nil
     ) {
         queue = []
+        isBatchRun = false
+        batchSucceeded = []
+        batchFailed = []
         self.onSuccess = onSuccess
         start(install: install, device: device, teamID: teamID)
     }
@@ -70,23 +107,47 @@ final class RenewRunner: ObservableObject {
         installs: [TrackedAppInstall],
         device: TrackedDevice,
         teamID: String,
-        onSuccess: ((UUID, String, String?, String?) -> Void)? = nil
+        onSuccess: SuccessCallback? = nil
     ) {
         guard !installs.isEmpty else { return }
         self.onSuccess = onSuccess
+        isBatchRun = installs.count > 1
+        batchSucceeded = []
+        batchFailed = []
         var remaining = installs
         let first = remaining.removeFirst()
         queue = remaining.map { ($0, device, teamID) }
         start(install: first, device: device, teamID: teamID)
     }
 
+    func cancel() {
+        guard isRunning else { return }
+        wasCancelled = true
+        queue = []
+        isBatchRun = false
+        batchSucceeded = []
+        batchFailed = []
+        downloadProgress = nil
+        if let proc = process, proc.isRunning {
+            proc.terminate()
+        }
+        process = nil
+        activeInstallID = nil
+        status = .idle
+    }
+
     private func start(install: TrackedAppInstall, device: TrackedDevice, teamID: String) {
         guard !isRunning else { return }
+        wasCancelled = false
         activeInstallID = install.id
+        currentInstallName = install.name
         currentAssetName = install.lastAssetName
         currentTag = install.selectedTag ?? install.lastInstalledTag
+        downloadProgress = nil
         status = .running(stage: nil, detail: "Starting…")
         logTail = ""
+
+        rotateLogIfNeeded()
 
         guard let scriptURL = Self.resolveScriptURL() else {
             status = .failure(
@@ -105,12 +166,17 @@ final class RenewRunner: ObservableObject {
             "--bundle-id", install.bundleID,
             "--device-id", device.id,
             "--device-name", device.name,
-            "--repo", install.githubRepo,
+            "--app-name", install.name,
             "--platform", device.platform.scriptPlatform,
             "--no-config-write",
         ]
-        if let tag = install.selectedTag, !tag.isEmpty {
-            args.append(contentsOf: ["--tag", tag])
+        if let localPath = install.localIPAPath, !localPath.isEmpty {
+            args.append(contentsOf: ["--ipa", localPath])
+        } else {
+            args.append(contentsOf: ["--repo", install.githubRepo])
+            if let tag = install.selectedTag, !tag.isEmpty {
+                args.append(contentsOf: ["--tag", tag])
+            }
         }
         process.arguments = args
 
@@ -122,6 +188,9 @@ final class RenewRunner: ObservableObject {
         env["RENEWIO_SUPPORT_DIR"] = support.path
         env["RENEWIO_LOG_DIR"] = logs.path
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+        if let token = KeychainStore.readGitHubToken(), !token.isEmpty {
+            env["GITHUB_TOKEN"] = token
+        }
         process.environment = env
 
         let statusURL = support.appendingPathComponent("last-status.txt")
@@ -157,14 +226,19 @@ final class RenewRunner: ObservableObject {
             let leftoverOut = outHandle.readDataToEndOfFile()
             let leftoverErr = errHandle.readDataToEndOfFile()
             Task { @MainActor in
+                guard let self else { return }
+                if self.wasCancelled {
+                    self.wasCancelled = false
+                    return
+                }
                 if let text = String(data: leftoverOut, encoding: .utf8), !text.isEmpty {
-                    self?.consume(output: text)
+                    self.consume(output: text)
                 }
                 if let text = String(data: leftoverErr, encoding: .utf8), !text.isEmpty {
-                    self?.consume(output: text)
+                    self.consume(output: text)
                 }
-                self?.process = nil
-                self?.handleTermination(status: proc.terminationStatus)
+                self.process = nil
+                self.handleTermination(status: proc.terminationStatus)
             }
         }
 
@@ -180,6 +254,7 @@ final class RenewRunner: ObservableObject {
     func clearStatus() {
         if !isRunning {
             status = .idle
+            downloadProgress = nil
             activeInstallID = nil
         }
     }
@@ -187,6 +262,7 @@ final class RenewRunner: ObservableObject {
     // MARK: - Parsing
 
     private func consume(output: String) {
+        guard !wasCancelled else { return }
         appendLog(output)
         for rawLine in output.split(whereSeparator: \.isNewline) {
             let line = String(rawLine)
@@ -196,10 +272,23 @@ final class RenewRunner: ObservableObject {
                 let stageID = parts.first ?? ""
                 let label = parts.count > 1 ? parts[1] : stageID
                 let stage = RenewStage(rawValue: stageID)
+                if stage != .download {
+                    downloadProgress = nil
+                }
                 status = .running(stage: stage, detail: label)
+            } else if line.hasPrefix("[PROGRESS] ") {
+                let payload = String(line.dropFirst("[PROGRESS] ".count))
+                let parts = payload.split(separator: "|").map(String.init)
+                if parts.count >= 4, parts[0] == "download",
+                   let pct = Int(parts[1]),
+                   let have = Int64(parts[2]),
+                   let total = Int64(parts[3]) {
+                    downloadProgress = DownloadProgress(percent: pct, downloadedBytes: have, totalBytes: total)
+                }
             } else if line.hasPrefix("[INFO] ") {
                 let info = String(line.dropFirst("[INFO] ".count))
                 if info.localizedCaseInsensitiveContains("Selected cached IPA:")
+                    || info.localizedCaseInsensitiveContains("Selected local IPA:")
                     || info.localizedCaseInsensitiveContains("Latest release:")
                     || info.localizedCaseInsensitiveContains("Using cached")
                     || info.localizedCaseInsensitiveContains("Downloading ") {
@@ -212,44 +301,58 @@ final class RenewRunner: ObservableObject {
                 let parts = payload.split(separator: "|", maxSplits: 1).map(String.init)
                 let stageID = parts.first ?? "unknown"
                 let message = parts.count > 1 ? parts[1] : payload
+                downloadProgress = nil
                 status = .failure(stage: stageID, message: message)
-                notify(title: "Renewio failed", body: message)
-                queue = []
+                if !isBatchRun {
+                    notify(title: "Renewio failed", body: message)
+                }
             } else if line.hasPrefix("[RESULT] ") {
                 let payload = String(line.dropFirst("[RESULT] ".count))
-                let parts = payload.split(separator: "|").map(String.init)
+                let parts = payload.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
                 if parts.count >= 4, parts[0] == "ok" {
                     let version = parts[1]
                     let device = parts[2]
-                    let detail = parts[3...].joined(separator: "|")
+                    let detail = parts[3]
+                    let expiresAt = (parts.count >= 5 && !parts[4].isEmpty) ? parts[4] : nil
+                    downloadProgress = nil
                     status = .success(
                         version: version,
                         deviceName: device,
                         detail: detail,
                         tag: currentTag,
-                        assetName: currentAssetName
+                        assetName: currentAssetName,
+                        expiresAt: expiresAt
                     )
                     if let installID = activeInstallID {
-                        onSuccess?(installID, version, currentTag, currentAssetName)
+                        onSuccess?(installID, version, currentTag, currentAssetName, expiresAt)
                     }
-                    notify(
-                        title: "Installed \(version)",
-                        body: "Installed on \(device). Renew again within 7 days if you use a free Apple ID."
-                    )
+                    if !isBatchRun {
+                        notify(
+                            title: "Installed \(currentInstallName) \(version)",
+                            body: "Installed on \(device)."
+                        )
+                    }
                 }
             }
         }
     }
 
     private func handleTermination(status code: Int32) {
+        downloadProgress = nil
         switch self.status {
         case .success:
+            if isBatchRun { batchSucceeded.append(currentInstallName) }
             advanceQueueIfNeeded()
             return
-        case .failure:
-            activeInstallID = nil
+        case let .failure(_, message):
+            if isBatchRun {
+                batchFailed.append(BatchFailure(appName: currentInstallName, message: message))
+                advanceQueueIfNeeded()
+            } else {
+                activeInstallID = nil
+            }
             return
-        case .running, .idle:
+        case .running, .idle, .batchSummary:
             break
         }
 
@@ -257,10 +360,16 @@ final class RenewRunner: ObservableObject {
             consume(output: line + "\n")
             switch self.status {
             case .success:
+                if isBatchRun { batchSucceeded.append(currentInstallName) }
                 advanceQueueIfNeeded()
                 return
-            case .failure:
-                activeInstallID = nil
+            case let .failure(_, message):
+                if isBatchRun {
+                    batchFailed.append(BatchFailure(appName: currentInstallName, message: message))
+                    advanceQueueIfNeeded()
+                } else {
+                    activeInstallID = nil
+                }
                 return
             default:
                 break
@@ -273,34 +382,60 @@ final class RenewRunner: ObservableObject {
                 deviceName: "device",
                 detail: "Renew finished.",
                 tag: currentTag,
-                assetName: currentAssetName
+                assetName: currentAssetName,
+                expiresAt: nil
             )
             if let installID = activeInstallID {
-                onSuccess?(installID, "unknown", currentTag, currentAssetName)
+                onSuccess?(installID, "unknown", currentTag, currentAssetName, nil)
             }
+            if isBatchRun { batchSucceeded.append(currentInstallName) }
             advanceQueueIfNeeded()
         } else {
             let detail = Self.latestErrorFromLog()
                 ?? "Renew exited with code \(code)."
             self.status = .failure(stage: "unknown", message: detail)
-            notify(title: "Renewio failed", body: detail)
-            queue = []
-            activeInstallID = nil
+            if isBatchRun {
+                batchFailed.append(BatchFailure(appName: currentInstallName, message: detail))
+                advanceQueueIfNeeded()
+            } else {
+                notify(title: "Renewio failed", body: detail)
+                activeInstallID = nil
+            }
         }
     }
 
     private func advanceQueueIfNeeded() {
         guard !queue.isEmpty else {
             activeInstallID = nil
+            if isBatchRun {
+                let succeeded = batchSucceeded
+                let failed = batchFailed
+                isBatchRun = false
+                status = .batchSummary(succeeded: succeeded, failed: failed)
+                let summaryBody = failed.isEmpty
+                    ? "Renewed \(succeeded.count) apps successfully."
+                    : "\(succeeded.count) succeeded, \(failed.count) failed."
+                notify(title: "Renew all finished", body: summaryBody)
+            }
             return
         }
         let next = queue.removeFirst()
-        // Brief pause so UI can show success before the next run starts.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !self.wasCancelled else { return }
             self.status = .idle
             self.start(install: next.install, device: next.device, teamID: next.teamID)
         }
+    }
+
+    private func rotateLogIfNeeded() {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+              let size = attrs[.size] as? UInt64,
+              size > Self.maxLogBytes
+        else { return }
+        let backup = logURL.deletingPathExtension().appendingPathExtension("log.1")
+        try? FileManager.default.removeItem(at: backup)
+        try? FileManager.default.moveItem(at: logURL, to: backup)
     }
 
     private static var supportDirectory: URL {
