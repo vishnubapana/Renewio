@@ -1,0 +1,7 @@
+.DS_Store
+.tmp/
+build/
+dist/
+**/xcuserdata/
+**/.swiftpm/
+**/DerivedData/
