@@ -10,10 +10,6 @@ struct OnboardingView: View {
     @State private var xcodeOK = true
     @State private var sdks = AvailableSDKs(tvOS: true, iOS: true)
     @State private var isSaving = false
-    @State private var manualName = ""
-    @State private var manualID = ""
-    @State private var manualPlatform: DevicePlatform = .tvos
-    @State private var showManualDevice = false
 
     @State private var draftDevices: [TrackedDevice] = []
     @State private var draftInstalls: [TrackedAppInstall] = []
@@ -23,26 +19,40 @@ struct OnboardingView: View {
     @State private var sourceDraftURL = ""
     @State private var isRepoVerified = false
     @State private var isAddingNewApp = false
+    /// Scroll anchor to restore when the edit panel closes.
+    @State private var scrollRestoreID: String?
+    @State private var scrollToEditID: String?
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().overlay(RenewioTheme.border)
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 14) {
-                    if !xcodeOK || (!sdks.tvOS && !sdks.iOS) {
-                        environmentWarningCard
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !xcodeOK || (!sdks.tvOS && !sdks.iOS) {
+                            environmentWarningCard
+                        }
+                        devicesSection
+                        appsSection
+                        teamSection
+                        if let errorMessage {
+                            errorBanner(errorMessage)
+                        }
                     }
-                    devicesSection
-                    appsSection
-                    teamSection
-                    if let errorMessage {
-                        errorBanner(errorMessage)
+                    .padding(16)
+                }
+                .frame(height: 540)
+                .onChange(of: scrollToEditID) { _, target in
+                    guard let target else { return }
+                    scrollEditPanelIntoView(proxy: proxy, editID: target)
+                }
+                .onChange(of: editingInstall?.id) { _, newID in
+                    if newID == nil {
+                        restoreScrollAfterEditClose(proxy: proxy)
                     }
                 }
-                .padding(16)
             }
-            .frame(height: 540)
             Divider().overlay(RenewioTheme.border)
             footer
         }
@@ -106,12 +116,9 @@ struct OnboardingView: View {
             }
         } content: {
             if draftDevices.isEmpty && isLoadingDevices {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Scanning for paired devices…")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(RenewioTheme.mutedForeground)
-                }
+                LoadingLabel(title: "Scanning for paired devices…", isLoading: true)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
             } else if draftDevices.isEmpty && discovered.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No paired devices detected")
@@ -169,52 +176,8 @@ struct OnboardingView: View {
                                 .padding(.vertical, 8)
                                 .background(CardSurface(fill: Color.white.opacity(0.03), cornerRadius: 8))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RenewioPressButtonStyle())
                         }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.15)) { showManualDevice.toggle() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: showManualDevice ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("Enter device manually")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(RenewioTheme.mutedForeground)
-                }
-                .buttonStyle(.plain)
-
-                if showManualDevice {
-                    VStack(spacing: 8) {
-                        Picker("Platform", selection: $manualPlatform) {
-                            ForEach(DevicePlatform.allCases) { platform in
-                                Text(platform.displayName).tag(platform)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        TextField("Device name", text: $manualName)
-                            .textFieldStyle(RenewioTextFieldStyle())
-                        TextField("Device UDID", text: $manualID)
-                            .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
-                        Button("Add manual device") {
-                            let id = manualID.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let name = manualName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !id.isEmpty else { return }
-                            addDevice(TrackedDevice(
-                                id: id,
-                                name: name.isEmpty ? manualPlatform.displayName : name,
-                                platform: manualPlatform
-                            ))
-                            showManualDevice = false
-                            manualID = ""
-                        }
-                        .buttonStyle(SecondaryButtonStyle())
-                        .disabled(manualID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
@@ -240,41 +203,127 @@ struct OnboardingView: View {
                 Text("No apps yet. Tap Add app and paste a GitHub HTTPS clone link.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(RenewioTheme.mutedForeground)
-            } else if !isAddingNewApp || isRepoVerified {
+            } else {
                 VStack(spacing: 6) {
-                    ForEach(installsForSelected.filter { editingInstall?.id != $0.id }) { install in
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(install.name)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(RenewioTheme.foreground)
-                                Text("\(install.githubRepo) · \(install.bundleID)")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(RenewioTheme.mutedForeground)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            Spacer()
-                            Button {
-                                beginEditApp(install)
-                            } label: {
-                                Text("Edit")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(RenewioTheme.accent)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(CardSurface(fill: Color.white.opacity(0.03), cornerRadius: 8))
+                    ForEach(installsForSelected) { install in
+                        appRowCard(install)
+                    }
+
+                    ExpandablePanel(isExpanded: isAddingNewApp && !isRepoVerified) {
+                        sourcePasteStep
+                    }
+
+                    if isAddingNewApp, isRepoVerified, let editing = editingInstall,
+                       !installsForSelected.contains(where: { $0.id == editing.id }) {
+                        newAppEditorCard(editing)
                     }
                 }
             }
+        }
+    }
 
-            if isAddingNewApp && !isRepoVerified {
-                sourcePasteStep
-            } else if let editing = editingInstall, isRepoVerified {
-                appEditor(editing)
+    private func appRowCard(_ install: TrackedAppInstall) -> some View {
+        let isEditing = editingInstall?.id == install.id && isRepoVerified && !isAddingNewApp
+        let display = isEditing ? (editingInstall ?? install) : install
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(display.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(RenewioTheme.foreground)
+                    Text("\(display.githubRepo) · \(display.bundleID)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Button {
+                    if isEditing {
+                        cancelAppEditor()
+                    } else {
+                        beginEditApp(install)
+                    }
+                } label: {
+                    Text(isEditing ? "Close" : "Edit")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isEditing ? RenewioTheme.mutedForeground : RenewioTheme.accent)
+                }
+                .buttonStyle(RenewioPressButtonStyle())
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            ExpandablePanel(isExpanded: isEditing) {
+                appEditorFields(install, isNew: false)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                    .background(alignment: .bottom) {
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.appEditAnchorID(install.id))
+                    }
+            }
+        }
+        .id(Self.appRowAnchorID(install.id))
+        .background(
+            CardSurface(
+                fill: isEditing ? RenewioTheme.accent.opacity(0.06) : Color.white.opacity(0.03),
+                border: isEditing ? RenewioTheme.accent.opacity(0.25) : RenewioTheme.border,
+                cornerRadius: RenewioTheme.radiusMd
+            )
+        )
+    }
+
+    private func newAppEditorCard(_ install: TrackedAppInstall) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(install.name.isEmpty ? "New app" : install.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(RenewioTheme.foreground)
+                    Text("\(install.githubRepo) · \(install.bundleID)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Button {
+                    cancelAppEditor()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                }
+                .buttonStyle(RenewioPressButtonStyle())
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            appEditorFields(install, isNew: true)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .background(alignment: .bottom) {
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.newAppEditAnchorID)
+                }
+        }
+        .id(Self.newAppRowAnchorID)
+        .background(
+            CardSurface(
+                fill: RenewioTheme.accent.opacity(0.06),
+                border: RenewioTheme.accent.opacity(0.25),
+                cornerRadius: RenewioTheme.radiusMd
+            )
+        )
+        .onAppear {
+            scrollRestoreID = Self.newAppRowAnchorID
+            scrollToEditID = nil
+            Task { @MainActor in
+                scrollToEditID = Self.newAppEditAnchorID
             }
         }
     }
@@ -293,11 +342,14 @@ struct OnboardingView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(RenewioTheme.mutedForeground)
 
-            TextField("https://github.com/owner/repo.git", text: $sourceDraftURL)
-                .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
-                .onSubmit {
-                    Task { await verifyAndResolveSource() }
-                }
+            RenewioTextField(
+                placeholder: "https://github.com/owner/repo.git",
+                text: $sourceDraftURL,
+                monospaced: true
+            )
+            .onSubmit {
+                Task { await verifyAndResolveSource() }
+            }
 
             HStack(spacing: 8) {
                 Button("Cancel") {
@@ -309,13 +361,12 @@ struct OnboardingView: View {
                 Button {
                     Task { await verifyAndResolveSource() }
                 } label: {
-                    HStack(spacing: 6) {
-                        if isScanningReleases {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(isScanningReleases ? "Verifying…" : "Continue")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
+                    LoadingLabel(
+                        title: isScanningReleases ? "Verifying…" : "Continue",
+                        isLoading: isScanningReleases,
+                        tint: RenewioTheme.accentForeground
+                    )
+                    .font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
@@ -326,23 +377,10 @@ struct OnboardingView: View {
         .background(CardSurface(fill: RenewioTheme.accent.opacity(0.06), border: RenewioTheme.accent.opacity(0.25)))
     }
 
-    private func appEditor(_ install: TrackedAppInstall) -> some View {
+    private func appEditorFields(_ install: TrackedAppInstall, isNew: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(isAddingNewApp ? "New app" : "Edit app")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(RenewioTheme.foreground)
-                Spacer()
-                Text(install.githubRepo)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(RenewioTheme.mutedForeground)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
             labeledField("Name") {
-                TextField("App name", text: binding(\.name, in: install))
-                    .textFieldStyle(RenewioTextFieldStyle())
+                RenewioTextField(placeholder: "App name", text: binding(\.name, in: install))
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -382,8 +420,11 @@ struct OnboardingView: View {
 
             labeledField("Bundle ID") {
                 HStack(spacing: 8) {
-                    TextField("com.renewio.app", text: binding(\.bundleID, in: install))
-                        .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
+                    RenewioTextField(
+                        placeholder: "com.renewio.app",
+                        text: binding(\.bundleID, in: install),
+                        monospaced: true
+                    )
                     InlineActionLink(title: "Suggest", systemImage: "sparkles") {
                         let team = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
                         let name = editingInstall?.name ?? install.name
@@ -393,28 +434,35 @@ struct OnboardingView: View {
             }
 
             HStack(spacing: 8) {
-                if !isAddingNewApp, draftInstalls.contains(where: { $0.id == install.id }) {
-                    Button("Remove") {
-                        draftInstalls.removeAll { $0.id == install.id }
-                        cancelAppEditor()
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                } else {
-                    Button("Cancel") {
-                        cancelAppEditor()
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .frame(width: 92)
+                Button("Cancel") {
+                    cancelAppEditor()
                 }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(width: 92)
+
+                if !isNew {
+                    Button("Remove") {
+                        withAnimation(RenewioMotion.expand) {
+                            draftInstalls.removeAll { $0.id == install.id }
+                            cancelAppEditor()
+                        }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+
                 Button("Done") {
                     finishEditingApp()
                 }
                 .buttonStyle(PrimaryButtonStyle())
             }
         }
-        .padding(10)
-        .background(CardSurface(fill: RenewioTheme.accent.opacity(0.06), border: RenewioTheme.accent.opacity(0.25)))
+        .padding(.top, 2)
     }
+
+    private static func appRowAnchorID(_ id: UUID) -> String { "app-row-\(id.uuidString)" }
+    private static func appEditAnchorID(_ id: UUID) -> String { "app-edit-\(id.uuidString)" }
+    private static let newAppRowAnchorID = "app-row-new"
+    private static let newAppEditAnchorID = "app-edit-new"
 
     private func beginAddApp() {
         guard let deviceID = selectedDeviceID else {
@@ -422,31 +470,71 @@ struct OnboardingView: View {
             return
         }
         _ = deviceID
-        isAddingNewApp = true
-        isRepoVerified = false
-        sourceDraftURL = ""
-        editingInstall = nil
+        // Don't restore scroll when leaving an edit to start Add app.
+        scrollToEditID = nil
+        scrollRestoreID = nil
+        withAnimation(RenewioMotion.expand) {
+            isAddingNewApp = true
+            isRepoVerified = false
+            sourceDraftURL = ""
+            editingInstall = nil
+            errorMessage = nil
+        }
         model.availableVersions = []
-        errorMessage = nil
     }
 
     private func beginEditApp(_ install: TrackedAppInstall) {
-        isAddingNewApp = false
-        isRepoVerified = true
-        sourceDraftURL = "https://github.com/\(install.githubRepo).git"
-        editingInstall = install
+        let rowID = Self.appRowAnchorID(install.id)
+        let editID = Self.appEditAnchorID(install.id)
+        scrollRestoreID = rowID
+        withAnimation(RenewioMotion.expand) {
+            isAddingNewApp = false
+            isRepoVerified = true
+            sourceDraftURL = "https://github.com/\(install.githubRepo).git"
+            editingInstall = install
+            errorMessage = nil
+        }
         model.refreshVersions(forRepo: install.githubRepo)
-        errorMessage = nil
+        // Reset then set so onChange fires even when re-editing the same app.
+        scrollToEditID = nil
+        Task { @MainActor in
+            scrollToEditID = editID
+        }
         Task { await scanReleases() }
     }
 
     private func cancelAppEditor() {
-        isAddingNewApp = false
-        isRepoVerified = false
-        sourceDraftURL = ""
-        editingInstall = nil
+        scrollToEditID = nil
+        withAnimation(RenewioMotion.expand) {
+            isAddingNewApp = false
+            isRepoVerified = false
+            sourceDraftURL = ""
+            editingInstall = nil
+            errorMessage = nil
+        }
         model.availableVersions = []
-        errorMessage = nil
+    }
+
+    private func scrollEditPanelIntoView(proxy: ScrollViewProxy, editID: String) {
+        Task { @MainActor in
+            // Wait for ExpandablePanel height animation / measure.
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            guard scrollToEditID == editID else { return }
+            withAnimation(RenewioMotion.expand) {
+                proxy.scrollTo(editID, anchor: .bottom)
+            }
+        }
+    }
+
+    private func restoreScrollAfterEditClose(proxy: ScrollViewProxy) {
+        guard let restoreID = scrollRestoreID else { return }
+        scrollRestoreID = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            withAnimation(RenewioMotion.expand) {
+                proxy.scrollTo(restoreID, anchor: .top)
+            }
+        }
     }
 
     // MARK: - Team
@@ -457,8 +545,7 @@ struct OnboardingView: View {
                 Task { await autoDetectTeam() }
             }
         } content: {
-            TextField("e.g. 52L6R8UQZU", text: $teamID)
-                .textFieldStyle(RenewioTextFieldStyle(monospaced: true))
+            RenewioTextField(placeholder: "e.g. 52L6R8UQZU", text: $teamID, monospaced: true)
             Text("Shared across all devices and apps. Apple ID stays in Xcode.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(RenewioTheme.mutedForeground)
@@ -476,11 +563,12 @@ struct OnboardingView: View {
             Button {
                 Task { await save() }
             } label: {
-                HStack(spacing: 6) {
-                    if isSaving { ProgressView().controlSize(.small) }
-                    Text(isSaving ? "Saving…" : "Save")
-                        .font(.system(size: 13, weight: .semibold))
-                }
+                LoadingLabel(
+                    title: isSaving ? "Saving…" : "Save",
+                    isLoading: isSaving,
+                    tint: RenewioTheme.accentForeground
+                )
+                .font(.system(size: 13, weight: .semibold))
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(PrimaryButtonStyle())
@@ -590,7 +678,7 @@ struct OnboardingView: View {
                 bundleID: suggestedBundleID(team: team, appName: appName)
             )
             sourceDraftURL = "https://github.com/\(info.ownerRepo).git"
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(RenewioMotion.expand) {
                 isRepoVerified = true
             }
         } catch {
@@ -763,59 +851,56 @@ private struct XcodeStatusButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
-    @State private var pushedCursor = false
+    @FocusState private var isFocused: Bool
+
+    private var tint: Color {
+        ready ? RenewioTheme.success : RenewioTheme.accent
+    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Circle()
-                    .fill(ready ? RenewioTheme.success : RenewioTheme.accent)
-                    .frame(width: 6, height: 6)
-                    .shadow(color: (ready ? RenewioTheme.success : RenewioTheme.accent).opacity(0.6), radius: 4)
+                StatusDot(tint: tint)
                 Text(ready ? "Xcode OK" : "Xcode")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(
-                        isHovered
+                        (isHovered || isFocused)
                             ? RenewioTheme.foreground
                             : (ready ? RenewioTheme.mutedForeground : RenewioTheme.accent)
                     )
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundStyle(isHovered ? RenewioTheme.accent : RenewioTheme.mutedForeground.opacity(0.7))
+                    .foregroundStyle(
+                        (isHovered || isFocused)
+                            ? RenewioTheme.accent
+                            : RenewioTheme.mutedForeground.opacity(0.7)
+                    )
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(isHovered ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.04))
+            .background(
+                (isHovered || isFocused) ? RenewioTheme.accent.opacity(0.12) : Color.white.opacity(0.04)
+            )
             .clipShape(Capsule())
             .overlay(
                 Capsule()
                     .stroke(
-                        isHovered
+                        (isHovered || isFocused)
                             ? RenewioTheme.accent.opacity(0.45)
                             : (ready ? RenewioTheme.border : RenewioTheme.accent.opacity(0.35)),
                         lineWidth: 1
                     )
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RenewioPressButtonStyle())
         .help("Open Xcode")
-        .onHover { hovering in
-            isHovered = hovering
-            if hovering && !pushedCursor {
-                NSCursor.pointingHand.push()
-                pushedCursor = true
-            } else if !hovering && pushedCursor {
-                NSCursor.pop()
-                pushedCursor = false
-            }
-        }
-        .onDisappear {
-            if pushedCursor {
-                NSCursor.pop()
-                pushedCursor = false
-            }
-            isHovered = false
-        }
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .focused($isFocused)
+        .interactiveHover($isHovered)
+        .shadow(
+            color: RenewioTheme.accent.opacity(isFocused ? 0.2 : 0),
+            radius: isFocused ? 6 : 0
+        )
+        .animation(RenewioMotion.hover, value: isHovered)
+        .animation(RenewioMotion.hover, value: isFocused)
     }
 }

@@ -134,13 +134,11 @@ struct MenuPopoverView: View {
         Button {
             model.renewAllOnSelectedDevice()
         } label: {
-            HStack(spacing: 8) {
-                if model.renewRunner.isRunning {
-                    ProgressView().controlSize(.small)
-                }
-                Text(model.renewRunner.isRunning ? "Renewing…" : "Renew all")
-                    .font(.system(size: 13, weight: .semibold))
-            }
+            LoadingLabel(
+                title: model.renewRunner.isRunning ? "Renewing…" : "Renew all",
+                isLoading: model.renewRunner.isRunning
+            )
+            .font(.system(size: 13, weight: .semibold))
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(SecondaryButtonStyle())
@@ -153,6 +151,9 @@ private struct DevicePill: View {
     let isSelected: Bool
     let action: () -> Void
 
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -162,7 +163,7 @@ private struct DevicePill: View {
                     Text(device.name)
                         .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
-                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                        .transition(.move(edge: .trailing).combined(with: .scale(scale: 0.92, anchor: .leading)))
                 }
             }
             .foregroundStyle(isSelected ? RenewioTheme.accentForeground : RenewioTheme.accent)
@@ -170,16 +171,29 @@ private struct DevicePill: View {
             .frame(width: isSelected ? nil : 32, height: 32)
             .background(
                 Capsule()
-                    .fill(isSelected ? RenewioTheme.accent : Color.clear)
+                    .fill(
+                        isSelected
+                            ? RenewioTheme.accent
+                            : ((isHovered || isFocused) ? RenewioTheme.accent.opacity(0.12) : Color.clear)
+                    )
             )
             .overlay(
                 Capsule()
-                    .stroke(RenewioTheme.accent, lineWidth: isSelected ? 0 : 1.5)
+                    .stroke(
+                        RenewioTheme.accent.opacity(isSelected ? 0 : ((isHovered || isFocused) ? 1 : 0.85)),
+                        lineWidth: isSelected ? 0 : 1.5
+                    )
+            )
+            .shadow(
+                color: RenewioTheme.accent.opacity(isFocused && !isSelected ? 0.25 : 0),
+                radius: isFocused ? 6 : 0
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RenewioPressButtonStyle())
         .help("\(device.name) · \(device.platform.displayName)")
-        .animation(.easeOut(duration: 0.18), value: isSelected)
+        .focused($isFocused)
+        .interactiveHover($isHovered)
+        .animation(RenewioMotion.transition, value: isSelected)
     }
 }
 
@@ -215,10 +229,7 @@ private struct AppInstallCard: View {
                         }
 
                         HStack(spacing: 5) {
-                            Circle()
-                                .fill(state.tint)
-                                .frame(width: 6, height: 6)
-                                .shadow(color: state.tint.opacity(0.55), radius: 3)
+                            StatusDot(tint: state.tint)
                             Text(state.statusLabel)
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(state.tint)
@@ -261,10 +272,22 @@ private struct AppInstallCard: View {
                 }
 
                 statusExtras
+                    .animation(RenewioMotion.expand, value: isActive)
+                    .animation(RenewioMotion.expand, value: statusIdentity)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(CardSurface())
+        }
+    }
+
+    private var statusIdentity: String {
+        guard isActive else { return "inactive" }
+        switch model.renewRunner.status {
+        case .idle: return "idle"
+        case .running(let stage, _): return "running-\(stage?.rawValue ?? "none")"
+        case .success: return "success"
+        case .failure: return "failure"
         }
     }
 
@@ -282,6 +305,7 @@ private struct AppInstallCard: View {
                     .progressViewStyle(.linear)
                     .tint(RenewioTheme.accent)
                 }
+                .transition(.renewioExpandCollapse)
             case let .success(version, deviceName, detail, _, _):
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Success", systemImage: "checkmark.circle.fill")
@@ -294,6 +318,7 @@ private struct AppInstallCard: View {
                         .font(.system(size: 10))
                         .foregroundStyle(RenewioTheme.mutedForeground)
                 }
+                .transition(.renewioExpandCollapse)
             case let .failure(_, message):
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Failed", systemImage: "xmark.octagon.fill")
@@ -314,7 +339,7 @@ private struct AppInstallCard: View {
                         .frame(maxHeight: 100)
                         .padding(6)
                         .background(Color.black.opacity(0.35))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
                         Button {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(errorLog, forType: .string)
@@ -322,10 +347,11 @@ private struct AppInstallCard: View {
                             Label("Copy log", systemImage: "doc.on.doc")
                                 .font(.system(size: 10.5, weight: .medium))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RenewioPressButtonStyle())
                         .foregroundStyle(RenewioTheme.mutedForeground)
                     }
                 }
+                .transition(.renewioExpandCollapse)
             case .idle:
                 EmptyView()
             }
@@ -350,57 +376,46 @@ private struct RenewIconButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
-    @State private var pushedCursor = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         Button(action: action) {
             ZStack {
                 if isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(RenewioTheme.accentForeground)
+                    InlineSpinner(tint: RenewioTheme.accentForeground)
+                        .transition(.scale.combined(with: .move(edge: .bottom)))
                 } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(RenewioTheme.accentForeground)
                         .rotationEffect(.degrees(isHovered ? 180 : 0))
+                        .animation(RenewioMotion.iconSpin, value: isHovered)
                 }
             }
             .frame(width: 32, height: 32)
             .background(
-                RenewioTheme.accent.opacity(disabled && !isRunning ? 0.4 : (isHovered ? 1 : 0.92))
+                RenewioTheme.accent.opacity(
+                    disabled && !isRunning
+                        ? 0.4
+                        : ((isHovered || isFocused) ? 1 : 0.92)
+                )
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: RenewioTheme.radiusMd, style: .continuous))
             .shadow(
-                color: disabled ? .clear : RenewioTheme.accent.opacity(isHovered ? 0.45 : 0.25),
-                radius: isHovered ? 8 : 4
+                color: disabled
+                    ? .clear
+                    : RenewioTheme.accent.opacity((isHovered || isFocused) ? 0.45 : 0.25),
+                radius: (isHovered || isFocused) ? 8 : 4
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RenewioPressButtonStyle())
         .disabled(disabled)
         .help("Renew")
-        .onHover { hovering in
-            guard !disabled else { return }
-            withAnimation(.easeOut(duration: 0.28)) {
-                isHovered = hovering
-            }
-            if hovering && !pushedCursor {
-                NSCursor.pointingHand.push()
-                pushedCursor = true
-            } else if !hovering && pushedCursor {
-                NSCursor.pop()
-                pushedCursor = false
-            }
-        }
-        .onDisappear {
-            if pushedCursor {
-                NSCursor.pop()
-                pushedCursor = false
-            }
-            isHovered = false
-        }
-        .scaleEffect(isHovered && !disabled ? 1.04 : 1)
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .focused($isFocused)
+        .interactiveHover($isHovered, enabled: !disabled)
+        .scaleEffect(isHovered && !disabled ? RenewioMotion.hoverScale : 1)
+        .animation(RenewioMotion.hover, value: isHovered)
+        .renewioFocusRing(isFocused: isFocused && !disabled, cornerRadius: RenewioTheme.radiusMd)
     }
 }
 

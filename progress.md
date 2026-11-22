@@ -10,7 +10,7 @@ Formerly named **ReNuvio** — renamed to Renewio because the tool is multi-sour
 ./scripts/install-renewio.sh
 ```
 
-That builds a Release app, ad-hoc signs it, copies it to `/Applications/Renewio.app`, and writes a shareable DMG at `dist/Renewio-1.1.0.dmg` (drag into Applications).
+That builds a Release app, ad-hoc signs it, copies it to `/Applications/Renewio.app`, and writes a shareable DMG at `dist/Renewio-1.2.0.dmg` (drag into Applications).
 
 Then open from Applications, Spotlight, or:
 
@@ -56,12 +56,14 @@ IPA cache: `~/Library/Application Support/Renewio/downloads/<owner>__<repo>/` (k
 ## UI notes
 
 - Main popover: device switcher pills + per-app countdown cards + Renew / Renew all
-- Settings stays inside the same `360px` MenuBarExtra (shared `SectionCard` / `SelectableOptionRow` / `CardSurface` in `Theme.swift`)
+- Settings stays inside the same `360px` MenuBarExtra
+- Shared interaction layer in `Components.swift` (hover/press/focus modifiers, `LoadingLabel`, `StatusDot`, buttons, `RenewioTextField`); tokens/motion in `Theme.swift` (`RenewioMotion`)
+- Hover, press scale, amber focus rings, and loading spinners are consistent across menu + Settings; Settings ↔ main uses a short opacity transition
 - Failure logs stay in-app (Copy); full files still at `~/Library/Logs/Renewio/`
 
 ## Verified locally
 
-- `xcodebuild` **Release** Renewio.app → `dist/Renewio.app`
+- `xcodebuild` **Release** Renewio.app → `dist/Renewio.app` (post interaction polish)
 - `ProvisioningStub` (tvOS) and `ProvisioningStubIOS` (iOS) schemes build
 - v1 → v2 config migration preserves Living Room + Nuvio TV `3.5.2` countdown
 - Script flags: `--repo`, `--platform`, `--tag`, `--ipa`, `--no-config-write`
@@ -69,6 +71,8 @@ IPA cache: `~/Library/Application Support/Renewio/downloads/<owner>__<repo>/` (k
 ## Layout
 
 - `Renewio/` — SwiftUI MenuBarExtra app + Resources
+- `Renewio/Sources/Theme.swift` — color + motion tokens
+- `Renewio/Sources/Components.swift` — shared surfaces, controls, interaction modifiers
 - `scripts/renewio.sh` — install pipeline
 - `scripts/build-renewio.sh` — builds into `dist/Renewio.app`
 - `scripts/install-renewio.sh` — install to `/Applications` + DMG

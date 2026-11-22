@@ -49,11 +49,15 @@ final class AppModel: ObservableObject {
     }
 
     func openOnboarding() {
-        showOnboarding = true
+        withAnimation(RenewioMotion.transition) {
+            showOnboarding = true
+        }
     }
 
     func handleSetupClosed() {
-        showOnboarding = false
+        withAnimation(RenewioMotion.transition) {
+            showOnboarding = false
+        }
     }
 
     func selectDevice(_ deviceID: String) {

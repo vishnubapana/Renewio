@@ -15,6 +15,7 @@
 		B10000000000000000000006 /* MenuPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* MenuPopoverView.swift */; };
 		B10000000000000000000007 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* OnboardingView.swift */; };
 		B10000000000000000000008 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* Theme.swift */; };
+		B1000000000000000000000F /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* Components.swift */; };
 		B1000000000000000000000C /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
 		B10000000000000000000009 /* renewio.sh in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* renewio.sh */; };
 		B1000000000000000000000A /* ProvisioningStub in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* ProvisioningStub */; };
@@ -31,6 +32,7 @@
 		B20000000000000000000006 /* MenuPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPopoverView.swift; sourceTree = "<group>"; };
 		B20000000000000000000007 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		B2000000000000000000000F /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		B2000000000000000000000C /* ExpiryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpiryNotifier.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* renewio.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "renewio.sh"; sourceTree = "<group>"; };
 		B2000000000000000000000A /* ProvisioningStub */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ProvisioningStub; sourceTree = "<group>"; };
@@ -71,6 +73,7 @@
 				B20000000000000000000006 /* MenuPopoverView.swift */,
 				B20000000000000000000007 /* OnboardingView.swift */,
 				B20000000000000000000008 /* Theme.swift */,
+				B2000000000000000000000F /* Components.swift */,
 				B2000000000000000000000C /* ExpiryNotifier.swift */,
 			);
 			path = Sources;
@@ -199,6 +202,7 @@
 				B10000000000000000000006 /* MenuPopoverView.swift in Sources */,
 				B10000000000000000000007 /* OnboardingView.swift in Sources */,
 				B10000000000000000000008 /* Theme.swift in Sources */,
+				B1000000000000000000000F /* Components.swift in Sources */,
 				B1000000000000000000000C /* ExpiryNotifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

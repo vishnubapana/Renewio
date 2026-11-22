@@ -10,11 +10,14 @@ struct RenewioApp: App {
                 if model.showOnboarding {
                     OnboardingView()
                         .environmentObject(model)
+                        .transition(.opacity)
                 } else {
                     MenuPopoverView()
                         .environmentObject(model)
+                        .transition(.opacity)
                 }
             }
+            .animation(RenewioMotion.transition, value: model.showOnboarding)
             .frame(width: RenewioTheme.popoverWidth)
             .background(AmbientBackdrop())
             .environment(\.colorScheme, .dark)
