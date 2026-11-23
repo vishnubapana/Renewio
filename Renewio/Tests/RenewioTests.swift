@@ -486,4 +486,143 @@ final class RenewioTests: XCTestCase {
         disabled.securityReviewEnabled = false
         XCTAssertFalse(disabled.isSecurityReviewEnabled)
     }
+
+    // MARK: - Unpinned one-step vuln fallback
+
+    private func makeEligibleRelease(tag: String, version: String, ageDays: Int, now: Date) -> ReleaseOption {
+        ReleaseOption(
+            tag: tag,
+            version: version,
+            assetName: "App-\(version)-unsigned.ipa",
+            sizeBytes: 10,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-TimeInterval(ageDays) * 24 * 60 * 60)
+        )
+    }
+
+    private func makeScan(
+        release: ReleaseOption,
+        elevated: Bool,
+        now: Date = Date(timeIntervalSince1970: 1_700_000_000)
+    ) -> SecurityScanResult {
+        let findings: [SecurityFinding]
+        if elevated {
+            findings = [
+                SecurityFinding(
+                    id: "GHSA-\(release.version)",
+                    packageName: "dep",
+                    packageVersion: "1.0.0",
+                    ecosystem: "npm",
+                    severity: .high,
+                    summary: "test",
+                    advisoryID: "GHSA-test"
+                )
+            ]
+        } else {
+            findings = []
+        }
+        return SecurityScanResult(
+            findings: findings,
+            ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: release.publishedAt, now: now),
+            notes: [],
+            release: release,
+            scannedTag: release.tag,
+            lockfilesFound: ["package-lock.json"]
+        )
+    }
+
+    func testUnpinnedFallbackUsesPriorWhenNewestHasElevatedFindings() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
+        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: makeScan(release: newest, elevated: true, now: now),
+            priorEligible: prior,
+            priorScan: makeScan(release: prior, elevated: false, now: now),
+            isAutoRenew: true
+        )
+        guard case let .use(chosen, result, fellBackFrom) = decision else {
+            return XCTFail("Expected use of prior eligible")
+        }
+        XCTAssertEqual(chosen.tag, "v1.9.0")
+        XCTAssertEqual(fellBackFrom?.tag, "v2.0.0")
+        XCTAssertFalse(result.hasElevatedFindings)
+        XCTAssertTrue(result.notes.contains(where: { $0.contains("Fell back") }))
+        XCTAssertEqual(SecurityScan.maxVulnFallbackSteps, 1)
+    }
+
+    func testUnpinnedFallbackSkipsAutoWhenPriorAlsoUnclean() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
+        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: makeScan(release: newest, elevated: true, now: now),
+            priorEligible: prior,
+            priorScan: makeScan(release: prior, elevated: true, now: now),
+            isAutoRenew: true
+        )
+        guard case let .skip(reason) = decision else {
+            return XCTFail("Expected auto skip when both unclean")
+        }
+        XCTAssertTrue(reason.localizedCaseInsensitiveContains("prior"))
+        XCTAssertTrue(reason.localizedCaseInsensitiveContains("no further fallback"))
+    }
+
+    func testUnpinnedFallbackManualReviewWhenPriorMissing() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: makeScan(release: newest, elevated: true, now: now),
+            priorEligible: nil,
+            priorScan: nil,
+            isAutoRenew: false
+        )
+        guard case let .needsReview(release, result, note) = decision else {
+            return XCTFail("Expected manual review when no prior eligible")
+        }
+        XCTAssertEqual(release.tag, "v2.0.0")
+        XCTAssertTrue(result.hasElevatedFindings)
+        XCTAssertNotNil(note)
+        XCTAssertTrue(note?.contains("No older eligible") == true)
+    }
+
+    func testUnpinnedFallbackUsesNewestWhenClean() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
+        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: makeScan(release: newest, elevated: false, now: now),
+            priorEligible: prior,
+            priorScan: nil,
+            isAutoRenew: true
+        )
+        guard case let .use(chosen, _, fellBackFrom) = decision else {
+            return XCTFail("Expected newest when clean")
+        }
+        XCTAssertEqual(chosen.tag, "v2.0.0")
+        XCTAssertNil(fellBackFrom)
+    }
+
+    func testUnpinnedFallbackManualReviewWhenPriorUncleanDoesNotWalkFurther() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let newest = makeEligibleRelease(tag: "v3.0.0", version: "3.0.0", ageDays: 15, now: now)
+        let prior = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 30, now: now)
+        // A third older release must never be considered by the decision helper (caller only passes one prior).
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: makeScan(release: newest, elevated: true, now: now),
+            priorEligible: prior,
+            priorScan: makeScan(release: prior, elevated: true, now: now),
+            isAutoRenew: false
+        )
+        guard case let .needsReview(release, _, note) = decision else {
+            return XCTFail("Expected manual review after one failed prior")
+        }
+        XCTAssertEqual(release.tag, "v3.0.0")
+        XCTAssertTrue(note?.contains("No further fallback") == true)
+    }
 }

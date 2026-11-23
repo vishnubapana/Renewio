@@ -306,7 +306,7 @@ final class AppModel: ObservableObject {
         securityScanningInstallID = nil
     }
 
-    /// Resolve release → age + optional OSV scan → proceed or prompt (pinned newer tags may Proceed).
+    /// Resolve release → age + optional OSV scan (+ one-step unpinned vuln fallback) → proceed or prompt.
     private func beginRenewWithSecurityGate(
         installs: [TrackedAppInstall],
         device: TrackedDevice,
@@ -322,54 +322,32 @@ final class AppModel: ObservableObject {
             securityScanningInstallID = install.id
             pendingSecurityReview = nil
 
-            let resolution = await resolveReleaseForSecurity(install: install)
-            switch resolution {
+            let outcome = await evaluateInstallForGate(
+                install: install,
+                reviewEnabled: reviewEnabled,
+                isAutoRenew: false
+            )
+            securityScanningInstallID = nil
+
+            switch outcome {
             case let .failed(message):
-                securityScanningInstallID = nil
                 renewRunner.surfacePreflightFailure(install: install, message: message)
                 continue
-            case let .ready(resolvedInstall, release):
-                let result: SecurityScanResult
-                if reviewEnabled {
-                    result = await SecurityScan.evaluate(install: install, release: release)
-                } else {
-                    // Age still enforced; OSS skipped when review toggle is off.
-                    let age: ReleaseAgeStatus
-                    if install.isLocalIPA {
-                        age = .notApplicable
-                    } else {
-                        age = ReleaseAgePolicy.ageStatus(publishedAt: release?.publishedAt)
-                    }
-                    result = SecurityScanResult(
-                        findings: [],
-                        ageStatus: age,
-                        notes: install.isLocalIPA
-                            ? ["Local IPA — security review disabled."]
-                            : ["OSS scan skipped — security review disabled in Settings."],
-                        release: release,
-                        scannedTag: release?.tag ?? resolvedInstall.selectedTag,
-                        lockfilesFound: []
-                    )
-                }
-
-                securityScanningInstallID = nil
-
-                // Too-new / unknown age or elevated OSV findings: ask the user.
-                // Auto/latest already resolved to an eligible release; pinned newer tags can Proceed.
-                if reviewEnabled && result.needsManualDecision {
-                    pendingSecurityReview = PendingSecurityReview(
-                        install: install,
-                        device: device,
-                        teamID: teamID,
-                        result: result,
-                        resolvedInstall: resolvedInstall,
-                        mode: queue.isEmpty ? .single : .batch(remaining: queue)
-                    )
-                    return
-                }
-
-                // Clean — start this renew. Remaining installs continue after via renewAll queue
-                // when we can start them together.
+            case let .skip(reason):
+                // Manual path should not skip silently — surface as failure.
+                renewRunner.surfacePreflightFailure(install: install, message: reason)
+                continue
+            case let .review(resolvedInstall, result):
+                pendingSecurityReview = PendingSecurityReview(
+                    install: install,
+                    device: device,
+                    teamID: teamID,
+                    result: result,
+                    resolvedInstall: resolvedInstall,
+                    mode: queue.isEmpty ? .single : .batch(remaining: queue)
+                )
+                return
+            case let .proceed(resolvedInstall, _):
                 if queue.isEmpty {
                     renewRunner.renew(
                         install: resolvedInstall,
@@ -382,56 +360,37 @@ final class AppModel: ObservableObject {
 
                 // Collect consecutive clean installs into one renewAll, stop at first that needs review.
                 var cleanBatch = [resolvedInstall]
-                var deferred: [TrackedAppInstall] = []
-                var hitDecision = false
-                while !queue.isEmpty && !hitDecision {
+                while !queue.isEmpty {
                     let next = queue.removeFirst()
                     securityScanningInstallID = next.id
-                    let nextResolution = await resolveReleaseForSecurity(install: next)
-                    switch nextResolution {
+                    let nextOutcome = await evaluateInstallForGate(
+                        install: next,
+                        reviewEnabled: reviewEnabled,
+                        isAutoRenew: false
+                    )
+                    securityScanningInstallID = nil
+                    switch nextOutcome {
                     case let .failed(message):
-                        securityScanningInstallID = nil
                         renewRunner.surfacePreflightFailure(install: next, message: message)
-                    case let .ready(nextResolved, nextRelease):
-                        let nextResult: SecurityScanResult
-                        if reviewEnabled {
-                            nextResult = await SecurityScan.evaluate(install: next, release: nextRelease)
-                        } else {
-                            let age: ReleaseAgeStatus = next.isLocalIPA
-                                ? .notApplicable
-                                : ReleaseAgePolicy.ageStatus(publishedAt: nextRelease?.publishedAt)
-                            nextResult = SecurityScanResult(
-                                findings: [],
-                                ageStatus: age,
-                                notes: ["OSS scan skipped — security review disabled in Settings."],
-                                release: nextRelease,
-                                scannedTag: nextRelease?.tag ?? nextResolved.selectedTag,
-                                lockfilesFound: []
-                            )
-                        }
-                        securityScanningInstallID = nil
-                        if reviewEnabled && nextResult.needsManualDecision {
-                            hitDecision = true
-                            deferred = [next] + queue
-                            pendingSecurityReview = PendingSecurityReview(
-                                install: next,
-                                device: device,
-                                teamID: teamID,
-                                result: nextResult,
-                                resolvedInstall: nextResolved,
-                                mode: deferred.dropFirst().isEmpty
-                                    ? .single
-                                    : .batch(remaining: Array(deferred.dropFirst()))
-                            )
-                            // Start clean ones first; decision waits.
-                            renewRunner.renewAll(
-                                installs: cleanBatch,
-                                device: device,
-                                teamID: teamID,
-                                onSuccess: successCallback
-                            )
-                            return
-                        }
+                    case let .skip(reason):
+                        renewRunner.surfacePreflightFailure(install: next, message: reason)
+                    case let .review(nextResolved, nextResult):
+                        pendingSecurityReview = PendingSecurityReview(
+                            install: next,
+                            device: device,
+                            teamID: teamID,
+                            result: nextResult,
+                            resolvedInstall: nextResolved,
+                            mode: queue.isEmpty ? .single : .batch(remaining: queue)
+                        )
+                        renewRunner.renewAll(
+                            installs: cleanBatch,
+                            device: device,
+                            teamID: teamID,
+                            onSuccess: successCallback
+                        )
+                        return
+                    case let .proceed(nextResolved, _):
                         cleanBatch.append(nextResolved)
                     }
                 }
@@ -448,52 +407,183 @@ final class AppModel: ObservableObject {
         securityScanningInstallID = nil
     }
 
-    private enum ReleaseResolution {
-        case ready(install: TrackedAppInstall, release: ReleaseOption?)
+    private enum GateOutcome {
+        case proceed(install: TrackedAppInstall, result: SecurityScanResult)
+        case review(install: TrackedAppInstall, result: SecurityScanResult)
         case failed(message: String)
+        case skip(reason: String)
     }
 
-    /// Resolves the GitHub release that will be installed (eligible latest, or pinned tag).
-    private func resolveReleaseForSecurity(install: TrackedAppInstall) async -> ReleaseResolution {
+    /// Scans and selects a release. Unpinned: newest eligible, then at most one older eligible on elevated OSV.
+    /// Pinned: no silent fallback.
+    private func evaluateInstallForGate(
+        install: TrackedAppInstall,
+        reviewEnabled: Bool,
+        isAutoRenew: Bool
+    ) async -> GateOutcome {
         if install.isLocalIPA {
-            return .ready(install: install, release: nil)
+            let result: SecurityScanResult
+            if reviewEnabled {
+                result = await SecurityScan.evaluate(install: install, release: nil)
+            } else {
+                result = SecurityScanResult(
+                    findings: [],
+                    ageStatus: .notApplicable,
+                    notes: ["Local IPA — security review disabled."],
+                    release: nil,
+                    scannedTag: nil,
+                    lockfilesFound: []
+                )
+            }
+            if reviewEnabled && result.needsManualDecision {
+                return .review(install: install, result: result)
+            }
+            return .proceed(install: install, result: result)
         }
+
         guard GitHubSource.normalize(install.githubRepo) != nil else {
             return .failed(message: "No valid GitHub repository configured.")
         }
 
         let pinned = (install.selectedTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !pinned.isEmpty {
-            do {
-                if let release = try await ConfigStore.fetchRelease(repo: install.githubRepo, tag: pinned) {
-                    return .ready(install: install, release: release)
-                }
-                // Tag not in recent list — still allow runner to try; unknown age prompts review.
-                let unknown = ReleaseOption(
-                    tag: pinned,
-                    version: pinned,
+            return await evaluatePinnedInstall(
+                install: install,
+                pinnedTag: pinned,
+                reviewEnabled: reviewEnabled,
+                isAutoRenew: isAutoRenew
+            )
+        }
+
+        return await evaluateUnpinnedInstall(
+            install: install,
+            reviewEnabled: reviewEnabled,
+            isAutoRenew: isAutoRenew
+        )
+    }
+
+    private func evaluatePinnedInstall(
+        install: TrackedAppInstall,
+        pinnedTag: String,
+        reviewEnabled: Bool,
+        isAutoRenew: Bool
+    ) async -> GateOutcome {
+        let release: ReleaseOption
+        do {
+            if let fetched = try await ConfigStore.fetchRelease(repo: install.githubRepo, tag: pinnedTag) {
+                release = fetched
+            } else {
+                release = ReleaseOption(
+                    tag: pinnedTag,
+                    version: pinnedTag,
                     assetName: "",
                     sizeBytes: 0,
                     isCached: false,
                     publishedAt: nil
                 )
-                return .ready(install: install, release: unknown)
-            } catch {
-                return .failed(message: "Could not resolve release \(pinned): \(error.localizedDescription)")
+            }
+        } catch {
+            return .failed(message: "Could not resolve release \(pinnedTag): \(error.localizedDescription)")
+        }
+
+        let result: SecurityScanResult
+        if reviewEnabled {
+            result = await SecurityScan.evaluate(install: install, release: release)
+        } else {
+            result = SecurityScanResult(
+                findings: [],
+                ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: release.publishedAt),
+                notes: ["OSS scan skipped — security review disabled in Settings."],
+                release: release,
+                scannedTag: release.tag,
+                lockfilesFound: []
+            )
+        }
+
+        if isAutoRenew {
+            switch SecurityScan.autoRenewDecision(result: result, securityReviewEnabled: reviewEnabled) {
+            case .proceed:
+                return .proceed(install: install, result: result)
+            case let .skip(reason):
+                return .skip(reason: reason)
             }
         }
 
+        if reviewEnabled && result.needsManualDecision {
+            return .review(install: install, result: result)
+        }
+        return .proceed(install: install, result: result)
+    }
+
+    private func evaluateUnpinnedInstall(
+        install: TrackedAppInstall,
+        reviewEnabled: Bool,
+        isAutoRenew: Bool
+    ) async -> GateOutcome {
+        let eligible: [ReleaseOption]
         do {
-            guard let eligible = try await ConfigStore.fetchLatestEligibleRelease(repo: install.githubRepo) else {
-                return .failed(
-                    message: "No GitHub release with an .ipa is at least \(ReleaseAgePolicy.minimumAgeDays) days old."
-                )
-            }
-            var resolved = install
-            resolved.selectedTag = eligible.tag
-            return .ready(install: resolved, release: eligible)
+            eligible = try await ConfigStore.fetchEligibleReleases(repo: install.githubRepo)
         } catch {
-            return .failed(message: "Could not resolve latest eligible release: \(error.localizedDescription)")
+            return .failed(message: "Could not resolve eligible releases: \(error.localizedDescription)")
+        }
+        guard let newest = eligible.first else {
+            return .failed(
+                message: "No GitHub release with an .ipa is at least \(ReleaseAgePolicy.minimumAgeDays) days old."
+            )
+        }
+
+        // Review off: age floor only — no OSV, no vuln fallback.
+        if !reviewEnabled {
+            var resolved = install
+            resolved.selectedTag = newest.tag
+            let result = SecurityScanResult(
+                findings: [],
+                ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: newest.publishedAt),
+                notes: ["OSS scan skipped — security review disabled in Settings."],
+                release: newest,
+                scannedTag: newest.tag,
+                lockfilesFound: []
+            )
+            if isAutoRenew {
+                switch SecurityScan.autoRenewDecision(result: result, securityReviewEnabled: false) {
+                case .proceed:
+                    return .proceed(install: resolved, result: result)
+                case let .skip(reason):
+                    return .skip(reason: reason)
+                }
+            }
+            return .proceed(install: resolved, result: result)
+        }
+
+        let newestScan = await SecurityScan.evaluate(install: install, release: newest)
+        var prior: ReleaseOption?
+        var priorScan: SecurityScanResult?
+        // Hard limit: only the single next-older eligible (index 1), never walk further.
+        if newestScan.hasElevatedFindings, eligible.count > SecurityScan.maxVulnFallbackSteps {
+            let candidate = eligible[SecurityScan.maxVulnFallbackSteps]
+            prior = candidate
+            priorScan = await SecurityScan.evaluate(install: install, release: candidate)
+        }
+
+        let decision = SecurityScan.decideUnpinnedVulnFallback(
+            newestEligible: newest,
+            newestScan: newestScan,
+            priorEligible: prior,
+            priorScan: priorScan,
+            isAutoRenew: isAutoRenew
+        )
+
+        switch decision {
+        case let .use(release, result, _):
+            var resolved = install
+            resolved.selectedTag = release.tag
+            return .proceed(install: resolved, result: result)
+        case let .needsReview(release, result, _):
+            var resolved = install
+            resolved.selectedTag = release.tag
+            return .review(install: resolved, result: result)
+        case let .skip(reason):
+            return .skip(reason: reason)
         }
     }
 
@@ -637,43 +727,27 @@ final class AppModel: ObservableObject {
             var approved: [TrackedAppInstall] = []
             for inst in dueForDevice {
                 lastAutoRenewAttemptByInstall[inst.id] = now
-                let resolution = await resolveReleaseForSecurity(install: inst)
-                switch resolution {
+                let outcome = await evaluateInstallForGate(
+                    install: inst,
+                    reviewEnabled: config.isSecurityReviewEnabled,
+                    isAutoRenew: true
+                )
+                switch outcome {
+                case let .proceed(resolved, _):
+                    approved.append(resolved)
+                case let .skip(reason):
+                    notifyAutoRenewSkip(install: inst, reason: reason)
                 case let .failed(message):
                     notifyAutoRenewSkip(install: inst, reason: message)
-                case let .ready(resolved, release):
-                    let scan: SecurityScanResult
-                    if config.isSecurityReviewEnabled {
-                        scan = await SecurityScan.evaluate(install: inst, release: release)
-                    } else if inst.isLocalIPA {
-                        scan = SecurityScanResult(
-                            findings: [],
-                            ageStatus: .notApplicable,
-                            notes: [],
-                            release: release,
-                            scannedTag: nil,
-                            lockfilesFound: []
-                        )
+                case let .review(_, result):
+                    // Auto-renew never shows UI; treat residual review as skip.
+                    let reason: String
+                    if result.hasElevatedFindings {
+                        reason = "\(result.elevatedFindings.count) elevated OSV finding(s) after one-step fallback"
                     } else {
-                        scan = SecurityScanResult(
-                            findings: [],
-                            ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: release?.publishedAt),
-                            notes: [],
-                            release: release,
-                            scannedTag: release?.tag ?? resolved.selectedTag,
-                            lockfilesFound: []
-                        )
+                        reason = result.notes.first ?? "Security review required"
                     }
-                    let decision = SecurityScan.autoRenewDecision(
-                        result: scan,
-                        securityReviewEnabled: config.isSecurityReviewEnabled
-                    )
-                    switch decision {
-                    case .proceed:
-                        approved.append(resolved)
-                    case let .skip(reason):
-                        notifyAutoRenewSkip(install: inst, reason: reason)
-                    }
+                    notifyAutoRenewSkip(install: inst, reason: reason)
                 }
             }
 

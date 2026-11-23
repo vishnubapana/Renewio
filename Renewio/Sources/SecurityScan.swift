@@ -168,6 +168,16 @@ enum AutoRenewSecurityDecision: Equatable {
     case skip(reason: String)
 }
 
+/// Outcome of unpinned (auto/latest) selection after at most one older eligible vuln fallback.
+enum UnpinnedVulnFallbackDecision: Equatable {
+    /// Install this release (optionally after falling back from a dirtier newer eligible).
+    case use(release: ReleaseOption, result: SecurityScanResult, fellBackFrom: ReleaseOption?)
+    /// Manual path: show Proceed/Reject for the newest eligible; one prior attempt already failed or missing.
+    case needsReview(release: ReleaseOption, result: SecurityScanResult, note: String?)
+    /// Auto-renew path: skip — newest unclean and the single prior candidate failed or is missing.
+    case skip(reason: String)
+}
+
 enum SecurityScan {
     static let lockfileNames = [
         "Package.resolved",
@@ -179,6 +189,9 @@ enum SecurityScan {
         "go.sum",
         "Gemfile.lock",
     ]
+
+    /// Hard limit: try the newest eligible, then at most **one** next-older eligible if elevated findings.
+    static let maxVulnFallbackSteps = 1
 
     // MARK: Auto-renew matrix
 
@@ -210,6 +223,77 @@ enum SecurityScan {
             return .skip(reason: "\(count) medium/high/critical OSV finding\(count == 1 ? "" : "s")")
         }
         return .skip(reason: "Security review blocked auto-renew")
+    }
+
+    /// Pure decision for unpinned selection. Callers scan at most two eligible releases (newest + one prior).
+    /// - Parameters:
+    ///   - newestEligible: Newest age-eligible IPA release.
+    ///   - newestScan: OSV/age scan of `newestEligible`.
+    ///   - priorEligible: The single next-older eligible release, if any.
+    ///   - priorScan: Scan of `priorEligible` when it exists and newest had elevated findings; nil if not scanned/missing.
+    ///   - isAutoRenew: Auto-renew skips when fallback fails; manual shows review instead.
+    static func decideUnpinnedVulnFallback(
+        newestEligible: ReleaseOption,
+        newestScan: SecurityScanResult,
+        priorEligible: ReleaseOption?,
+        priorScan: SecurityScanResult?,
+        isAutoRenew: Bool
+    ) -> UnpinnedVulnFallbackDecision {
+        if !newestScan.hasElevatedFindings {
+            if newestScan.needsManualDecision {
+                // Unexpected for age-eligible, but surface review rather than auto-install.
+                if isAutoRenew {
+                    return .skip(reason: "Newest eligible release needs review")
+                }
+                return .needsReview(release: newestEligible, result: newestScan, note: nil)
+            }
+            return .use(release: newestEligible, result: newestScan, fellBackFrom: nil)
+        }
+
+        // Newest has elevated findings — try exactly one prior eligible.
+        guard let priorEligible else {
+            let note = "No older eligible release (≥\(ReleaseAgePolicy.minimumAgeDays) days) to fall back to."
+            if isAutoRenew {
+                let count = newestScan.elevatedFindings.count
+                return .skip(
+                    reason: "\(count) elevated OSV finding\(count == 1 ? "" : "s") on \(newestEligible.tag ?? "latest"); no prior eligible"
+                )
+            }
+            var annotated = newestScan
+            annotated.notes.insert(note, at: 0)
+            return .needsReview(release: newestEligible, result: annotated, note: note)
+        }
+
+        guard let priorScan else {
+            let note = "Could not scan prior eligible \(priorEligible.tag ?? "release")."
+            if isAutoRenew {
+                return .skip(reason: note)
+            }
+            var annotated = newestScan
+            annotated.notes.insert(note, at: 0)
+            return .needsReview(release: newestEligible, result: annotated, note: note)
+        }
+
+        if !priorScan.hasElevatedFindings && !priorScan.needsManualDecision {
+            var adopted = priorScan
+            let fromTag = newestEligible.tag ?? newestEligible.version
+            let toTag = priorEligible.tag ?? priorEligible.version
+            adopted.notes.insert(
+                "Fell back from \(fromTag) → \(toTag) (elevated OSV on newer eligible; one-step limit).",
+                at: 0
+            )
+            adopted.release = priorEligible
+            return .use(release: priorEligible, result: adopted, fellBackFrom: newestEligible)
+        }
+
+        let priorTag = priorEligible.tag ?? priorEligible.version
+        let note = "Also checked prior eligible \(priorTag) — still unclean. No further fallback."
+        if isAutoRenew {
+            return .skip(reason: "Elevated OSV on newest eligible and prior \(priorTag); no further fallback")
+        }
+        var annotated = newestScan
+        annotated.notes.insert(note, at: 0)
+        return .needsReview(release: newestEligible, result: annotated, note: note)
     }
 
     // MARK: Public scan entry

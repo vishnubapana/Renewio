@@ -676,10 +676,15 @@ final class ConfigStore: ObservableObject {
         TrackedAppInstall.parseISO8601(raw)
     }
 
+    /// IPA-bearing releases that meet the 14-day age floor, newest first (fetches up to 30).
+    static func fetchEligibleReleases(repo: String, now: Date = Date()) async throws -> [ReleaseOption] {
+        let releases = try await fetchRecentReleases(repo: repo, limit: 30, perPage: 30)
+        return releases.filter { ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now) }
+    }
+
     /// Newest IPA-bearing release that meets the 14-day age floor (fetches up to 30 releases).
     static func fetchLatestEligibleRelease(repo: String, now: Date = Date()) async throws -> ReleaseOption? {
-        let releases = try await fetchRecentReleases(repo: repo, limit: 30, perPage: 30)
-        return releases.first { ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now) }
+        try await fetchEligibleReleases(repo: repo, now: now).first
     }
 
     static func fetchRelease(repo: String, tag: String) async throws -> ReleaseOption? {
