@@ -18,6 +18,7 @@
 		B1000000000000000000000F /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* Components.swift */; };
 		B1000000000000000000000C /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
 		B10000000000000000000010 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* SystemServices.swift */; };
+		B10000000000000000000011 /* SecurityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* SecurityScan.swift */; };
 		B10000000000000000000009 /* renewio.sh in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* renewio.sh */; };
 		B1000000000000000000000A /* ProvisioningStub in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* ProvisioningStub */; };
 		B1000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* Assets.xcassets */; };
@@ -32,6 +33,7 @@
 		B10000000000000000000027 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* Components.swift */; };
 		B10000000000000000000028 /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
 		B10000000000000000000029 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* SystemServices.swift */; };
+		B1000000000000000000002A /* SecurityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* SecurityScan.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +58,7 @@
 		B2000000000000000000000F /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		B2000000000000000000000C /* ExpiryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpiryNotifier.swift; sourceTree = "<group>"; };
 		B20000000000000000000010 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
+		B20000000000000000000011 /* SecurityScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityScan.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* renewio.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "renewio.sh"; sourceTree = "<group>"; };
 		B2000000000000000000000A /* ProvisioningStub */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ProvisioningStub; sourceTree = "<group>"; };
 		B2000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -108,6 +111,7 @@
 				B2000000000000000000000F /* Components.swift */,
 				B2000000000000000000000C /* ExpiryNotifier.swift */,
 				B20000000000000000000010 /* SystemServices.swift */,
+				B20000000000000000000011 /* SecurityScan.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -269,6 +273,7 @@
 				B1000000000000000000000F /* Components.swift in Sources */,
 				B1000000000000000000000C /* ExpiryNotifier.swift in Sources */,
 				B10000000000000000000010 /* SystemServices.swift in Sources */,
+				B10000000000000000000011 /* SecurityScan.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +291,7 @@
 				B10000000000000000000027 /* Components.swift in Sources */,
 				B10000000000000000000028 /* ExpiryNotifier.swift in Sources */,
 				B10000000000000000000029 /* SystemServices.swift in Sources */,
+				B1000000000000000000002A /* SecurityScan.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

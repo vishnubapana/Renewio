@@ -191,4 +191,298 @@ final class RenewioTests: XCTestCase {
         XCTAssertEqual(devices.first(where: { $0.udid == "UDID-IPHONE" })?.platform, .ios)
         XCTAssertEqual(devices.first(where: { $0.udid == "UDID-IPAD" })?.platform, .ipados)
     }
+
+    // MARK: - Release age eligibility
+
+    func testReleaseAgeEligibilityExactFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-14 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .eligible(ageDays: 14))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+    }
+
+    func testReleaseAgeEligibilityYoungerThanFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-3 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .tooNew(ageDays: 3, requiredDays: 14))
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+        XCTAssertTrue(status.isHardBlock)
+    }
+
+    func testReleaseAgeEligibilityOlderThanFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .eligible(ageDays: 30))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+    }
+
+    func testReleaseAgeEligibilityMissingDate() {
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: nil)
+        XCTAssertEqual(status, .unknown)
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: nil))
+        XCTAssertTrue(status.isHardBlock)
+    }
+
+    func testLatestEligibleSkipsTooNewReleases() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let tooNew = ReleaseOption(
+            tag: "v9.9.9",
+            version: "9.9.9",
+            assetName: "App-9.9.9-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-2 * 24 * 60 * 60)
+        )
+        let eligible = ReleaseOption(
+            tag: "v9.8.0",
+            version: "9.8.0",
+            assetName: "App-9.8.0-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-20 * 24 * 60 * 60)
+        )
+        let older = ReleaseOption(
+            tag: "v9.7.0",
+            version: "9.7.0",
+            assetName: "App-9.7.0-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-40 * 24 * 60 * 60)
+        )
+        let releases = [tooNew, eligible, older]
+        let latestEligible = releases.first {
+            ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now)
+        }
+        XCTAssertEqual(latestEligible?.tag, "v9.8.0")
+        XCTAssertFalse(tooNew.isAgeEligible)
+        XCTAssertTrue(eligible.isAgeEligible)
+    }
+
+    // MARK: - Lockfile parse smoke tests
+
+    func testParsePackageResolvedFixture() {
+        let fixture = """
+        {
+          "pins" : [
+            {
+              "identity" : "alamofire",
+              "kind" : "remoteSourceControl",
+              "location" : "https://github.com/Alamofire/Alamofire.git",
+              "state" : { "revision" : "abc", "version" : "5.6.4" }
+            }
+          ],
+          "version" : 2
+        }
+        """
+        let packages = SecurityScan.parsePackageResolved(fixture)
+        XCTAssertEqual(packages.count, 1)
+        XCTAssertEqual(packages.first?.name, "alamofire")
+        XCTAssertEqual(packages.first?.version, "5.6.4")
+        XCTAssertEqual(packages.first?.ecosystem, "SwiftURL")
+    }
+
+    func testParsePackageLockFixture() {
+        let fixture = """
+        {
+          "packages": {
+            "": { "name": "app", "version": "1.0.0" },
+            "node_modules/lodash": { "version": "4.17.21" },
+            "node_modules/@scope/pkg": { "version": "1.2.3" }
+          }
+        }
+        """
+        let packages = SecurityScan.parsePackageLock(fixture)
+        XCTAssertTrue(packages.contains(where: { $0.name == "lodash" && $0.version == "4.17.21" }))
+        XCTAssertTrue(packages.contains(where: { $0.name.contains("scope") && $0.version == "1.2.3" }))
+        XCTAssertTrue(packages.allSatisfy { $0.ecosystem == "npm" })
+    }
+
+    func testParseCargoLockFixture() {
+        let fixture = """
+        [[package]]
+        name = "serde"
+        version = "1.0.152"
+        source = "registry+https://github.com/rust-lang/crates.io-index"
+
+        [[package]]
+        name = "my-bin"
+        version = "0.1.0"
+        """
+        let packages = SecurityScan.parseCargoLock(fixture)
+        XCTAssertEqual(packages.count, 2)
+        XCTAssertEqual(packages.first?.name, "serde")
+        XCTAssertEqual(packages.first?.version, "1.0.152")
+        XCTAssertEqual(packages.first?.ecosystem, "crates.io")
+    }
+
+    func testParseGoSumFixture() {
+        let fixture = """
+        github.com/pkg/errors v0.9.1 h1:abc
+        github.com/pkg/errors v0.9.1/go.mod h1:def
+        golang.org/x/sys v0.1.0 h1:xyz
+        """
+        let packages = SecurityScan.parseGoSum(fixture)
+        XCTAssertTrue(packages.contains(where: {
+            $0.name == "github.com/pkg/errors" && $0.version == "v0.9.1" && $0.ecosystem == "Go"
+        }))
+        // go.mod line should dedupe against the hash line for same module/version.
+        XCTAssertEqual(
+            packages.filter { $0.name == "github.com/pkg/errors" && $0.version == "v0.9.1" }.count,
+            1
+        )
+    }
+
+    func testParsePodfileLockFixture() {
+        let fixture = """
+        PODS:
+          - Alamofire (5.6.4)
+          - Something/Sub (1.0.0):
+            - Alamofire
+
+        DEPENDENCIES:
+          - Alamofire
+        """
+        let packages = SecurityScan.parsePodfileLock(fixture)
+        XCTAssertTrue(packages.contains(where: { $0.name == "Alamofire" && $0.version == "5.6.4" }))
+        XCTAssertTrue(packages.contains(where: { $0.name == "Something" && $0.version == "1.0.0" }))
+    }
+
+    // MARK: - Auto-renew security decision matrix
+
+    func testAutoRenewDecisionMatrix() {
+        let cleanEligible = SecurityScanResult(
+            findings: [],
+            ageStatus: .eligible(ageDays: 20),
+            notes: [],
+            release: nil,
+            scannedTag: "v1.0.0",
+            lockfilesFound: ["Package.resolved"]
+        )
+        XCTAssertEqual(
+            SecurityScan.autoRenewDecision(result: cleanEligible, securityReviewEnabled: true),
+            .proceed
+        )
+
+        let tooNew = SecurityScanResult(
+            findings: [],
+            ageStatus: .tooNew(ageDays: 2, requiredDays: 14),
+            notes: [],
+            release: nil,
+            scannedTag: "v2.0.0",
+            lockfilesFound: []
+        )
+        if case let .skip(reason) = SecurityScan.autoRenewDecision(result: tooNew, securityReviewEnabled: true) {
+            XCTAssertTrue(reason.contains("2d"))
+        } else {
+            XCTFail("Expected skip for too-new release")
+        }
+
+        let elevated = SecurityScanResult(
+            findings: [
+                SecurityFinding(
+                    id: "GHSA-1",
+                    packageName: "lodash",
+                    packageVersion: "4.17.20",
+                    ecosystem: "npm",
+                    severity: .high,
+                    summary: "Prototype pollution",
+                    advisoryID: "GHSA-1"
+                )
+            ],
+            ageStatus: .eligible(ageDays: 30),
+            notes: [],
+            release: nil,
+            scannedTag: "v1.1.0",
+            lockfilesFound: ["package-lock.json"]
+        )
+        if case let .skip(reason) = SecurityScan.autoRenewDecision(result: elevated, securityReviewEnabled: true) {
+            XCTAssertTrue(reason.localizedCaseInsensitiveContains("finding"))
+        } else {
+            XCTFail("Expected skip for elevated findings")
+        }
+
+        // Review disabled: age still blocks, elevated findings do not.
+        XCTAssertEqual(
+            SecurityScan.autoRenewDecision(result: elevated, securityReviewEnabled: false),
+            .proceed
+        )
+        if case .skip = SecurityScan.autoRenewDecision(result: tooNew, securityReviewEnabled: false) {
+            // ok
+        } else {
+            XCTFail("Age floor still applies when review is disabled")
+        }
+
+        let local = SecurityScanResult(
+            findings: [],
+            ageStatus: .notApplicable,
+            notes: ["Local IPA"],
+            release: nil,
+            scannedTag: nil,
+            lockfilesFound: []
+        )
+        XCTAssertEqual(
+            SecurityScan.autoRenewDecision(result: local, securityReviewEnabled: true),
+            .proceed
+        )
+
+        let unknownAge = SecurityScanResult(
+            findings: [],
+            ageStatus: .unknown,
+            notes: [],
+            release: nil,
+            scannedTag: "v0.0.1",
+            lockfilesFound: []
+        )
+        if case .skip = SecurityScan.autoRenewDecision(result: unknownAge, securityReviewEnabled: true) {
+            // ok
+        } else {
+            XCTFail("Unknown age should skip auto-renew")
+        }
+    }
+
+    func testSecurityReviewAllowsProceedAnywayOnlyWhenAgeOK() {
+        let ageBlocked = SecurityScanResult(
+            findings: [],
+            ageStatus: .tooNew(ageDays: 1, requiredDays: 14),
+            notes: [],
+            release: nil,
+            scannedTag: "v1",
+            lockfilesFound: []
+        )
+        XCTAssertFalse(ageBlocked.allowsProceedAnyway)
+        XCTAssertTrue(ageBlocked.needsManualDecision)
+
+        let vulnOnly = SecurityScanResult(
+            findings: [
+                SecurityFinding(
+                    id: "x",
+                    packageName: "foo",
+                    packageVersion: "1.0.0",
+                    ecosystem: "npm",
+                    severity: .medium,
+                    summary: "issue",
+                    advisoryID: nil
+                )
+            ],
+            ageStatus: .eligible(ageDays: 20),
+            notes: [],
+            release: nil,
+            scannedTag: "v1",
+            lockfilesFound: ["package-lock.json"]
+        )
+        XCTAssertTrue(vulnOnly.allowsProceedAnyway)
+        XCTAssertTrue(vulnOnly.needsManualDecision)
+        XCTAssertFalse(vulnOnly.allowsAutoRenew)
+    }
+
+    func testConfigSecurityReviewDefaultsOn() {
+        let config = RenewioConfig(teamID: "TEAM123456")
+        XCTAssertTrue(config.isSecurityReviewEnabled)
+        var disabled = config
+        disabled.securityReviewEnabled = false
+        XCTAssertFalse(disabled.isSecurityReviewEnabled)
+    }
 }

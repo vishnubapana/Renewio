@@ -32,6 +32,7 @@ struct OnboardingView: View {
     // Preferences & Maintenance
     @State private var launchAtLogin = LaunchAtLoginManager.isEnabled
     @State private var autoRenewEnabled = false
+    @State private var securityReviewEnabled = true
     @State private var githubTokenInput = ""
     @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
     @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
@@ -653,6 +654,17 @@ struct OnboardingView: View {
                     isOn: $autoRenewEnabled
                 )
 
+                PreferenceToggleRow(
+                    title: "Require security review",
+                    subtitle: "Scan GitHub lockfiles with OSV before install; review findings before Proceed",
+                    isOn: $securityReviewEnabled
+                )
+
+                Text("GitHub releases must be at least 14 days old before install (fixed).")
+                    .font(.system(size: 10))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Divider().overlay(RenewioTheme.border)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -767,6 +779,7 @@ struct OnboardingView: View {
             draftInstalls = existing.installs
             selectedDeviceID = existing.selectedDeviceID ?? existing.devices.first?.id
             autoRenewEnabled = existing.isAutoRenewEnabled
+            securityReviewEnabled = existing.isSecurityReviewEnabled
         }
         launchAtLogin = LaunchAtLoginManager.isEnabled
         hasSavedGitHubToken = KeychainStore.hasGitHubToken
@@ -1078,7 +1091,8 @@ struct OnboardingView: View {
             devices: draftDevices,
             installs: draftInstalls,
             selectedDeviceID: selectedDeviceID ?? draftDevices.first?.id,
-            autoRenewEnabled: autoRenewEnabled
+            autoRenewEnabled: autoRenewEnabled,
+            securityReviewEnabled: securityReviewEnabled
         )
         do {
             try model.configStore.save(config)

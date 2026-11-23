@@ -359,7 +359,7 @@ PY
 
 fetch_release() {
   stage "release" "Fetching latest release"
-  local api="https://api.github.com/repos/${REPO}/releases?per_page=20"
+  local api="https://api.github.com/repos/${REPO}/releases?per_page=30"
   local json="$WORK_DIR/releases.json"
   local http
   local curl_headers=(-H "Accept: application/vnd.github+json" -H "User-Agent: Renewio")
@@ -380,27 +380,105 @@ fetch_release() {
     fi
   fi
 
-  python3 - "$json" "$WORK_DIR/asset.tsv" "$SELECTED_TAG" <<'PY'
+  set +e
+  python3 - "$json" "$WORK_DIR/asset.tsv" "$SELECTED_TAG" <<'PY' 2>"$WORK_DIR/release_err.txt"
 import json, sys, re
+from datetime import datetime, timezone, timedelta
+
 path, out, wanted_tag = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(path) as f:
-    releases = json.load(f)
-chosen = None
-asset = None
-for rel in releases:
-    if wanted_tag and (rel.get("tag_name") or "") != wanted_tag:
-        continue
+MIN_AGE_DAYS = 14
+
+def parse_github_date(raw):
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+def age_days(rel, now):
+    dt = parse_github_date(rel.get("published_at") or rel.get("created_at"))
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (now - dt).total_seconds() / 86400.0
+
+def is_old_enough(rel, now):
+    days = age_days(rel, now)
+    if days is None:
+        return False
+    return days >= MIN_AGE_DAYS
+
+def pick_ipa(rel):
     assets = rel.get("assets") or []
-    unsigned = [a for a in assets if a.get("name", "").lower().endswith(".ipa") and "unsigned" in a.get("name", "").lower()]
+    unsigned = [
+        a for a in assets
+        if a.get("name", "").lower().endswith(".ipa") and "unsigned" in a.get("name", "").lower()
+    ]
     ipas = unsigned or [a for a in assets if a.get("name", "").lower().endswith(".ipa")]
     if not ipas:
-        continue
+        return None
     ipas.sort(key=lambda a: (0 if "unsigned" in a["name"].lower() else 1, a["name"]))
-    chosen, asset = rel, ipas[0]
-    break
+    return ipas[0]
+
+with open(path) as f:
+    releases = json.load(f)
+
+now = datetime.now(timezone.utc)
+chosen = None
+asset = None
+pinned_too_new = None
+
+if wanted_tag:
+    for rel in releases:
+        if (rel.get("tag_name") or "") != wanted_tag:
+            continue
+        ipa = pick_ipa(rel)
+        if not ipa:
+            continue
+        if not is_old_enough(rel, now):
+            days = age_days(rel, now)
+            days_i = 0 if days is None else int(days)
+            pinned_too_new = (wanted_tag, days_i)
+            break
+        chosen, asset = rel, ipa
+        break
+    if pinned_too_new is not None:
+        tag, days_i = pinned_too_new
+        print(
+            f"GitHub release '{tag}' is only {days_i} day(s) old. "
+            f"Renewio requires releases to be at least {MIN_AGE_DAYS} days old before install.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+else:
+    for rel in releases:
+        ipa = pick_ipa(rel)
+        if not ipa:
+            continue
+        if not is_old_enough(rel, now):
+            continue
+        chosen, asset = rel, ipa
+        break
+
 if not chosen:
-    print("NO_ASSET", file=sys.stderr)
+    if wanted_tag:
+        print(
+            f"No .ipa asset found for GitHub release tag '{wanted_tag}'.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"No GitHub release with an .ipa is at least {MIN_AGE_DAYS} days old. "
+            "Wait for the newest release to age in, or pin an older eligible tag.",
+            file=sys.stderr,
+        )
     sys.exit(1)
+
 tag = chosen.get("tag_name") or ""
 name = asset["name"]
 # Use API asset URL when authenticated so private repo assets download cleanly.
@@ -413,6 +491,16 @@ with open(out, "w") as f:
     f.write(f"{tag}\t{version}\t{name}\t{browser_url}\t{api_url}\t{size}\n")
 print(f"{tag} / {version} / {name}")
 PY
+  local py_rc=$?
+  set -e
+  if [[ $py_rc -ne 0 ]]; then
+    local err_msg
+    err_msg="$(tr '\n' ' ' <"$WORK_DIR/release_err.txt" 2>/dev/null | sed 's/[[:space:]]*$//')"
+    if [[ -n "$err_msg" ]]; then
+      fail "$err_msg"
+    fi
+    fail "Could not resolve a GitHub release IPA."
+  fi
 
   IFS=$'\t' read -r RELEASE_TAG RELEASE_VERSION ASSET_NAME ASSET_URL ASSET_API_URL ASSET_SIZE < "$WORK_DIR/asset.tsv"
   info "Latest release: ${RELEASE_TAG} (${ASSET_NAME})"
