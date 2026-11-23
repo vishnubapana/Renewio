@@ -208,7 +208,7 @@ final class RenewioTests: XCTestCase {
         let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
         XCTAssertEqual(status, .tooNew(ageDays: 3, requiredDays: 14))
         XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
-        XCTAssertTrue(status.isHardBlock)
+        XCTAssertTrue(status.blocksAutomaticInstall)
     }
 
     func testReleaseAgeEligibilityOlderThanFourteenDays() {
@@ -223,7 +223,7 @@ final class RenewioTests: XCTestCase {
         let status = ReleaseAgePolicy.ageStatus(publishedAt: nil)
         XCTAssertEqual(status, .unknown)
         XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: nil))
-        XCTAssertTrue(status.isHardBlock)
+        XCTAssertTrue(status.blocksAutomaticInstall)
     }
 
     func testLatestEligibleSkipsTooNewReleases() {
@@ -443,8 +443,8 @@ final class RenewioTests: XCTestCase {
         }
     }
 
-    func testSecurityReviewAllowsProceedAnywayOnlyWhenAgeOK() {
-        let ageBlocked = SecurityScanResult(
+    func testPinnedTooNewAllowsManualProceedButBlocksAuto() {
+        let tooNewPinned = SecurityScanResult(
             findings: [],
             ageStatus: .tooNew(ageDays: 1, requiredDays: 14),
             notes: [],
@@ -452,8 +452,9 @@ final class RenewioTests: XCTestCase {
             scannedTag: "v1",
             lockfilesFound: []
         )
-        XCTAssertFalse(ageBlocked.allowsProceedAnyway)
-        XCTAssertTrue(ageBlocked.needsManualDecision)
+        XCTAssertTrue(tooNewPinned.allowsProceedAnyway)
+        XCTAssertTrue(tooNewPinned.needsManualDecision)
+        XCTAssertFalse(tooNewPinned.allowsAutoRenew)
 
         let vulnOnly = SecurityScanResult(
             findings: [

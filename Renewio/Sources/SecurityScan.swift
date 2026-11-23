@@ -32,7 +32,8 @@ enum ReleaseAgeStatus: Equatable {
     /// Local IPA / no GitHub release date applies.
     case notApplicable
 
-    var isHardBlock: Bool {
+    /// Auto / “Latest” paths never install these; manual pin may Proceed after review.
+    var blocksAutomaticInstall: Bool {
         switch self {
         case .tooNew, .unknown: return true
         case .eligible, .notApplicable: return false
@@ -44,9 +45,9 @@ enum ReleaseAgeStatus: Equatable {
         case let .eligible(days):
             return days == 1 ? "Release is 1 day old (meets 14-day floor)" : "Release is \(days) days old (meets 14-day floor)"
         case let .tooNew(days, required):
-            return "Release is only \(days) day\(days == 1 ? "" : "s") old — requires \(required)+ days"
+            return "Release is only \(days) day\(days == 1 ? "" : "s") old — auto/latest waits \(required)+ days; you can Proceed anyway"
         case .unknown:
-            return "Release publish date unknown — blocked until age can be verified"
+            return "Release publish date unknown — review before install"
         case .notApplicable:
             return "Local IPA — no GitHub age rule"
         }
@@ -143,12 +144,12 @@ struct SecurityScanResult: Equatable {
 
     var hasElevatedFindings: Bool { !elevatedFindings.isEmpty }
 
-    /// Manual install needs an explicit Proceed/Reject (or hard-block Reject only).
+    /// Manual install needs an explicit Proceed/Reject (age warning and/or elevated findings).
     var needsManualDecision: Bool {
-        ageStatus.isHardBlock || hasElevatedFindings
+        ageStatus.blocksAutomaticInstall || hasElevatedFindings
     }
 
-    /// Auto-renew may proceed only when age is OK and there are no medium+ findings.
+    /// Auto-renew / unpinned “latest” may proceed only when age is OK and there are no medium+ findings.
     var allowsAutoRenew: Bool {
         switch ageStatus {
         case .eligible, .notApplicable:
@@ -158,10 +159,8 @@ struct SecurityScanResult: Equatable {
         }
     }
 
-    /// Pinned too-new / unknown age: no “Proceed anyway”.
-    var allowsProceedAnyway: Bool {
-        !ageStatus.isHardBlock
-    }
+    /// User-selected (pinned) releases may always Proceed after review — including newer than 14 days.
+    var allowsProceedAnyway: Bool { true }
 }
 
 enum AutoRenewSecurityDecision: Equatable {

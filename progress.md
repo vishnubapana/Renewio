@@ -55,12 +55,12 @@ IPA cache: `~/Library/Application Support/Renewio/downloads/<owner>__<repo>/` (k
 
 Before resign/install of a GitHub-sourced IPA (manual renew, update badge, Renew all, auto-renew):
 
-1. **Age floor (fixed 14 days)** — only install GitHub releases with `published_at` ≥ 14 days. “Latest” / update badges resolve to the newest IPA release that meets the floor. Pinned tags that are too new are a **hard block** (no silent downgrade, no Proceed anyway).
+1. **Age floor (fixed 14 days) for auto/latest** — “Latest”, update badges, auto-renew, and untagged script fetches resolve to the newest IPA release with `published_at` ≥ 14 days. Users may **pin a newer tag** in Settings; manual renew then offers **Proceed anyway** after review (scripts honor `--tag` without the age skip).
 2. **OSV OSS scan** — `SecurityScan.swift` fetches lockfiles at the release tag via GitHub Contents (`Package.resolved`, `Podfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.sum`, `Gemfile.lock`) and POSTs to `https://api.osv.dev/v1/querybatch` (no third-party deps).
 3. **Manual UI** — compact review card in the menu popover: age verdict, elevated findings, **Reject** / **Proceed anyway**.
 4. **Auto-renew** — never interactive; proceeds only if age OK **and** no medium/high/critical findings; otherwise skip + local notification.
 5. **Local `.ipa`** — no age rule; OSS scan skipped with a “no GitHub source” note unless a repo is configured.
-6. **Scripts** — `scripts/renewio.sh` and `Renewio/Resources/renewio.sh` mirror the age filter (`[ERROR]` before download for too-new `--tag` / no eligible latest).
+6. **Scripts** — `scripts/renewio.sh` and `Renewio/Resources/renewio.sh`: no `--tag` → skip young releases; explicit `--tag` installs that release even if newer than 14 days.
 
 ## What Renew does
 

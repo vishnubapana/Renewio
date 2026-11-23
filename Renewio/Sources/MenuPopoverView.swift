@@ -621,17 +621,17 @@ private struct SecurityReviewCard: View {
 
     private var result: SecurityScanResult { review.result }
     private var elevated: [SecurityFinding] { result.elevatedFindings }
-    private var hardBlock: Bool { !result.allowsProceedAnyway }
+    private var ageWarn: Bool { result.ageStatus.blocksAutomaticInstall }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(
-                    hardBlock ? "Install blocked" : "Security review",
-                    systemImage: hardBlock ? "xmark.shield.fill" : "shield.lefthalf.filled"
+                    "Security review",
+                    systemImage: "shield.lefthalf.filled"
                 )
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(hardBlock ? RenewioTheme.danger : RenewioTheme.accent)
+                .foregroundStyle(RenewioTheme.accent)
                 Spacer()
                 Button {
                     model.dismissSecurityReview()
@@ -692,24 +692,22 @@ private struct SecurityReviewCard: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
 
-                if !hardBlock {
-                    Button {
-                        model.proceedSecurityReview()
-                    } label: {
-                        Text("Proceed anyway")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
+                Button {
+                    model.proceedSecurityReview()
+                } label: {
+                    Text(ageWarn || !elevated.isEmpty ? "Proceed anyway" : "Proceed")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(PrimaryButtonStyle())
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             CardSurface(
-                fill: (hardBlock ? RenewioTheme.danger : RenewioTheme.accent).opacity(0.08),
-                border: (hardBlock ? RenewioTheme.danger : RenewioTheme.accent).opacity(0.3),
+                fill: RenewioTheme.accent.opacity(0.08),
+                border: RenewioTheme.accent.opacity(0.3),
                 cornerRadius: RenewioTheme.radiusLg
             )
         )

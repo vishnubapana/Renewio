@@ -660,7 +660,7 @@ struct OnboardingView: View {
                     isOn: $securityReviewEnabled
                 )
 
-                Text("GitHub releases must be at least 14 days old before install (fixed).")
+                Text("Auto / Latest targets releases at least 14 days old. Pin a newer tag in Settings if you want to install sooner.")
                     .font(.system(size: 10))
                     .foregroundStyle(RenewioTheme.mutedForeground)
                     .fixedSize(horizontal: false, vertical: true)

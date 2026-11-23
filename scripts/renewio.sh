@@ -431,31 +431,19 @@ with open(path) as f:
 now = datetime.now(timezone.utc)
 chosen = None
 asset = None
-pinned_too_new = None
 
 if wanted_tag:
+    # Explicit pin: allow newer-than-14-day releases (user opted in).
     for rel in releases:
         if (rel.get("tag_name") or "") != wanted_tag:
             continue
         ipa = pick_ipa(rel)
         if not ipa:
             continue
-        if not is_old_enough(rel, now):
-            days = age_days(rel, now)
-            days_i = 0 if days is None else int(days)
-            pinned_too_new = (wanted_tag, days_i)
-            break
         chosen, asset = rel, ipa
         break
-    if pinned_too_new is not None:
-        tag, days_i = pinned_too_new
-        print(
-            f"GitHub release '{tag}' is only {days_i} day(s) old. "
-            f"Renewio requires releases to be at least {MIN_AGE_DAYS} days old before install.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
 else:
+    # Auto / latest: only IPA releases that meet the 14-day age floor.
     for rel in releases:
         ipa = pick_ipa(rel)
         if not ipa:
@@ -474,7 +462,7 @@ if not chosen:
     else:
         print(
             f"No GitHub release with an .ipa is at least {MIN_AGE_DAYS} days old. "
-            "Wait for the newest release to age in, or pin an older eligible tag.",
+            "Wait for the newest release to age in, or pin a specific tag in Settings.",
             file=sys.stderr,
         )
     sys.exit(1)

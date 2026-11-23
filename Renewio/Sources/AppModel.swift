@@ -242,7 +242,6 @@ final class AppModel: ObservableObject {
 
     func proceedSecurityReview() {
         guard let pending = pendingSecurityReview else { return }
-        guard pending.result.allowsProceedAnyway else { return }
         let install = pending.resolvedInstall
         let device = pending.device
         let teamID = pending.teamID
@@ -307,7 +306,7 @@ final class AppModel: ObservableObject {
         securityScanningInstallID = nil
     }
 
-    /// Resolve release → age + optional OSV scan → proceed, prompt, or hard-block.
+    /// Resolve release → age + optional OSV scan → proceed or prompt (pinned newer tags may Proceed).
     private func beginRenewWithSecurityGate(
         installs: [TrackedAppInstall],
         device: TrackedDevice,
@@ -355,19 +354,8 @@ final class AppModel: ObservableObject {
 
                 securityScanningInstallID = nil
 
-                if result.ageStatus.isHardBlock {
-                    // Pinned too-new / unknown: hard block (no Proceed anyway). Still show review card.
-                    pendingSecurityReview = PendingSecurityReview(
-                        install: install,
-                        device: device,
-                        teamID: teamID,
-                        result: result,
-                        resolvedInstall: resolvedInstall,
-                        mode: queue.isEmpty ? .single : .batch(remaining: queue)
-                    )
-                    return
-                }
-
+                // Too-new / unknown age or elevated OSV findings: ask the user.
+                // Auto/latest already resolved to an eligible release; pinned newer tags can Proceed.
                 if reviewEnabled && result.needsManualDecision {
                     pendingSecurityReview = PendingSecurityReview(
                         install: install,
@@ -422,7 +410,7 @@ final class AppModel: ObservableObject {
                             )
                         }
                         securityScanningInstallID = nil
-                        if nextResult.ageStatus.isHardBlock || (reviewEnabled && nextResult.needsManualDecision) {
+                        if reviewEnabled && nextResult.needsManualDecision {
                             hitDecision = true
                             deferred = [next] + queue
                             pendingSecurityReview = PendingSecurityReview(
@@ -480,7 +468,7 @@ final class AppModel: ObservableObject {
                 if let release = try await ConfigStore.fetchRelease(repo: install.githubRepo, tag: pinned) {
                     return .ready(install: install, release: release)
                 }
-                // Tag not in recent list — still allow runner to try; age unknown → hard block in scan.
+                // Tag not in recent list — still allow runner to try; unknown age prompts review.
                 let unknown = ReleaseOption(
                     tag: pinned,
                     version: pinned,
