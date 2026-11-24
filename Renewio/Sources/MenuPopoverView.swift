@@ -253,16 +253,22 @@ private struct DevicePill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: isSelected ? 4 : 0) {
                 Image(systemName: device.platform.systemImage)
                     .font(.system(size: 9, weight: .semibold))
+                // Keep the label mounted and clip its width so the pill expands/
+                // collapses smoothly without insert/remove opacity ghosting.
                 Text(device.name)
                     .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: isSelected ? 160 : 0, alignment: .leading)
+                    .clipped()
             }
             .foregroundStyle(isSelected ? RenewioTheme.accentForeground : RenewioTheme.accent)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, isSelected ? 8 : 6)
             .frame(height: pillHeight)
+            .frame(minWidth: pillHeight)
             .background(
                 Capsule()
                     .fill(
