@@ -60,10 +60,67 @@ enum KeychainStore {
 
     @discardableResult
     static func deleteGitHubToken() -> Bool {
+        delete(account: githubAccount)
+    }
+
+    // MARK: - Supabase security session
+
+    private static let securityTokenAccount = "supabase-access-token"
+    private static let securityEmailAccount = "supabase-user-email"
+
+    static func readSecurityAccessToken() -> String? { read(account: securityTokenAccount) }
+    static func saveSecurityAccessToken(_ token: String) { _ = save(account: securityTokenAccount, value: token) }
+    static func deleteSecurityAccessToken() { _ = delete(account: securityTokenAccount) }
+
+    static func readSecurityUserEmail() -> String? { read(account: securityEmailAccount) }
+    static func saveSecurityUserEmail(_ email: String) { _ = save(account: securityEmailAccount, value: email) }
+
+    private static func read(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: githubAccount,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let token = String(data: data, encoding: .utf8)
+        else { return nil }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    @discardableResult
+    private static func save(account: String, value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
+            return delete(account: account)
+        }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        let attributes: [String: Any] = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        if updateStatus == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
+        }
+        return false
+    }
+
+    @discardableResult
+    private static func delete(account: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
         ]
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound

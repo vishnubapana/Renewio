@@ -1,0 +1,31 @@
+# Local Supabase CLI config for Renewio security backend.
+
+[api]
+enabled = true
+
+[db]
+major_version = 15
+
+[auth]
+enabled = true
+
+[functions.request-scan]
+verify_jwt = true
+
+[functions.submit-report]
+verify_jwt = false
+
+[functions.check-eligibility]
+verify_jwt = true
+
+[functions.record-approval]
+verify_jwt = true
+
+[functions.revoke-approval]
+verify_jwt = true
+
+[functions.scan-status]
+verify_jwt = true
+
+[functions.recheck-vulns]
+verify_jwt = false

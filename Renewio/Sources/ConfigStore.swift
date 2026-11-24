@@ -67,6 +67,12 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
     var lastAssetName: String?
     /// Per-app opt-in for background auto-renew. Nil → true (migration default).
     var autoUpdateEnabled: Bool?
+    /// SHA-256 of the last original (unsigned) IPA that was security-assessed / installed.
+    var lastIpaSha256: String?
+    var lastReportId: String?
+    var lastReportSha256: String?
+    var lastAssessmentStatus: String?
+    var lastSecurityCheckedAt: String?
 
     static let defaultGitHubRepo = "bobsupra/NuvioTVOS"
     static let signingLifetime: TimeInterval = 7 * 24 * 60 * 60
@@ -84,7 +90,12 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         lastInstalledAt: String? = nil,
         lastExpiresAt: String? = nil,
         lastAssetName: String? = nil,
-        autoUpdateEnabled: Bool? = true
+        autoUpdateEnabled: Bool? = true,
+        lastIpaSha256: String? = nil,
+        lastReportId: String? = nil,
+        lastReportSha256: String? = nil,
+        lastAssessmentStatus: String? = nil,
+        lastSecurityCheckedAt: String? = nil
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -99,6 +110,11 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         self.lastExpiresAt = lastExpiresAt
         self.lastAssetName = lastAssetName
         self.autoUpdateEnabled = autoUpdateEnabled
+        self.lastIpaSha256 = lastIpaSha256
+        self.lastReportId = lastReportId
+        self.lastReportSha256 = lastReportSha256
+        self.lastAssessmentStatus = lastAssessmentStatus
+        self.lastSecurityCheckedAt = lastSecurityCheckedAt
     }
 
     /// Whether this app participates in global Auto-renew when nearby. Missing config → true.
@@ -314,6 +330,8 @@ struct ReleaseOption: Identifiable, Hashable {
     let sizeBytes: Int64
     let isCached: Bool
     let publishedAt: Date?
+    let assetID: Int?
+    let browserDownloadURL: URL?
 
     init(
         tag: String?,
@@ -321,7 +339,9 @@ struct ReleaseOption: Identifiable, Hashable {
         assetName: String,
         sizeBytes: Int64,
         isCached: Bool,
-        publishedAt: Date? = nil
+        publishedAt: Date? = nil,
+        assetID: Int? = nil,
+        browserDownloadURL: URL? = nil
     ) {
         self.tag = tag
         self.version = version
@@ -329,6 +349,8 @@ struct ReleaseOption: Identifiable, Hashable {
         self.sizeBytes = sizeBytes
         self.isCached = isCached
         self.publishedAt = publishedAt
+        self.assetID = assetID
+        self.browserDownloadURL = browserDownloadURL
     }
 
     var id: String { tag ?? assetName }
@@ -766,6 +788,8 @@ final class ConfigStore: ObservableObject {
                 version = tag
             }
 
+            let assetID = (chosen["id"] as? NSNumber)?.intValue
+            let browserURL = (chosen["browser_download_url"] as? String).flatMap(URL.init(string:))
             options.append(
                 ReleaseOption(
                     tag: tag,
@@ -773,7 +797,9 @@ final class ConfigStore: ObservableObject {
                     assetName: assetName,
                     sizeBytes: size,
                     isCached: cachedFiles.contains(assetName),
-                    publishedAt: publishedAt
+                    publishedAt: publishedAt,
+                    assetID: assetID,
+                    browserDownloadURL: browserURL
                 )
             )
             if options.count >= limit { break }

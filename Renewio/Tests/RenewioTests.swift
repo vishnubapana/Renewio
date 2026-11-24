@@ -257,226 +257,135 @@ final class RenewioTests: XCTestCase {
             ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now)
         }
         XCTAssertEqual(latestEligible?.tag, "v9.8.0")
-        XCTAssertFalse(tooNew.isAgeEligible)
-        XCTAssertTrue(eligible.isAgeEligible)
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: tooNew.publishedAt, now: now))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: eligible.publishedAt, now: now))
     }
 
-    // MARK: - Lockfile parse smoke tests
+    // MARK: - Shared security eligibility / hashing
 
-    func testParsePackageResolvedFixture() {
-        let fixture = """
-        {
-          "pins" : [
-            {
-              "identity" : "alamofire",
-              "kind" : "remoteSourceControl",
-              "location" : "https://github.com/Alamofire/Alamofire.git",
-              "state" : { "revision" : "abc", "version" : "5.6.4" }
-            }
-          ],
-          "version" : 2
-        }
-        """
-        let packages = SecurityScan.parsePackageResolved(fixture)
-        XCTAssertEqual(packages.count, 1)
-        XCTAssertEqual(packages.first?.name, "alamofire")
-        XCTAssertEqual(packages.first?.version, "5.6.4")
-        XCTAssertEqual(packages.first?.ecosystem, "SwiftURL")
+    func testArtifactHasherRoundTrip() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("renewio-hash-test.bin")
+        let payload = Data("renewio-security-hash".utf8)
+        try payload.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let hex = try ArtifactHasher.sha256Hex(ofFileAt: url)
+        XCTAssertEqual(hex.count, 64)
+        XCTAssertTrue(try ArtifactHasher.matches(fileAt: url, expectedHex: hex))
+        XCTAssertFalse(try ArtifactHasher.matches(fileAt: url, expectedHex: String(repeating: "0", count: 64)))
     }
 
-    func testParsePackageLockFixture() {
-        let fixture = """
-        {
-          "packages": {
-            "": { "name": "app", "version": "1.0.0" },
-            "node_modules/lodash": { "version": "4.17.21" },
-            "node_modules/@scope/pkg": { "version": "1.2.3" }
-          }
-        }
-        """
-        let packages = SecurityScan.parsePackageLock(fixture)
-        XCTAssertTrue(packages.contains(where: { $0.name == "lodash" && $0.version == "4.17.21" }))
-        XCTAssertTrue(packages.contains(where: { $0.name.contains("scope") && $0.version == "1.2.3" }))
-        XCTAssertTrue(packages.allSatisfy { $0.ecosystem == "npm" })
-    }
-
-    func testParseCargoLockFixture() {
-        let fixture = """
-        [[package]]
-        name = "serde"
-        version = "1.0.152"
-        source = "registry+https://github.com/rust-lang/crates.io-index"
-
-        [[package]]
-        name = "my-bin"
-        version = "0.1.0"
-        """
-        let packages = SecurityScan.parseCargoLock(fixture)
-        XCTAssertEqual(packages.count, 2)
-        XCTAssertEqual(packages.first?.name, "serde")
-        XCTAssertEqual(packages.first?.version, "1.0.152")
-        XCTAssertEqual(packages.first?.ecosystem, "crates.io")
-    }
-
-    func testParseGoSumFixture() {
-        let fixture = """
-        github.com/pkg/errors v0.9.1 h1:abc
-        github.com/pkg/errors v0.9.1/go.mod h1:def
-        golang.org/x/sys v0.1.0 h1:xyz
-        """
-        let packages = SecurityScan.parseGoSum(fixture)
-        XCTAssertTrue(packages.contains(where: {
-            $0.name == "github.com/pkg/errors" && $0.version == "v0.9.1" && $0.ecosystem == "Go"
-        }))
-        // go.mod line should dedupe against the hash line for same module/version.
-        XCTAssertEqual(
-            packages.filter { $0.name == "github.com/pkg/errors" && $0.version == "v0.9.1" }.count,
-            1
-        )
-    }
-
-    func testParsePodfileLockFixture() {
-        let fixture = """
-        PODS:
-          - Alamofire (5.6.4)
-          - Something/Sub (1.0.0):
-            - Alamofire
-
-        DEPENDENCIES:
-          - Alamofire
-        """
-        let packages = SecurityScan.parsePodfileLock(fixture)
-        XCTAssertTrue(packages.contains(where: { $0.name == "Alamofire" && $0.version == "5.6.4" }))
-        XCTAssertTrue(packages.contains(where: { $0.name == "Something" && $0.version == "1.0.0" }))
-    }
-
-    // MARK: - Auto-renew security decision matrix
-
-    func testAutoRenewDecisionMatrix() {
-        let cleanEligible = SecurityScanResult(
+    func testEligibilityAllowsAutoOnlyWhenChecksPassed() {
+        let passed = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .checksPassed,
+            installEligibility: .allow,
+            reportID: "r1",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "a", count: 64),
+            limitations: [],
+            findingsSummary: [:],
             findings: [],
-            ageStatus: .eligible(ageDays: 20),
-            notes: [],
-            release: nil,
-            scannedTag: "v1.0.0",
-            lockfilesFound: ["Package.resolved"]
+            reasons: ["checks_passed"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
         )
-        XCTAssertEqual(
-            SecurityScan.autoRenewDecision(result: cleanEligible, securityReviewEnabled: true),
-            .proceed
-        )
+        XCTAssertTrue(passed.allowsAutoRenew)
+        XCTAssertFalse(passed.needsManualDecision)
 
-        let tooNew = SecurityScanResult(
-            findings: [],
-            ageStatus: .tooNew(ageDays: 2, requiredDays: 14),
-            notes: [],
-            release: nil,
-            scannedTag: "v2.0.0",
-            lockfilesFound: []
-        )
-        if case let .skip(reason) = SecurityScan.autoRenewDecision(result: tooNew, securityReviewEnabled: true) {
-            XCTAssertTrue(reason.contains("2d"))
-        } else {
-            XCTFail("Expected skip for too-new release")
-        }
-
-        let elevated = SecurityScanResult(
+        let review = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .reviewRequired,
+            installEligibility: .allowWithApproval,
+            reportID: "r2",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "b", count: 64),
+            limitations: [],
+            findingsSummary: ["medium": 1],
             findings: [
-                SecurityFinding(
-                    id: "GHSA-1",
-                    packageName: "lodash",
-                    packageVersion: "4.17.20",
-                    ecosystem: "npm",
-                    severity: .high,
-                    summary: "Prototype pollution",
-                    advisoryID: "GHSA-1"
+                RemoteFinding(
+                    id: "f1",
+                    scanner: "osv_scanner",
+                    severity: "medium",
+                    title: "dep issue",
+                    summary: "test",
+                    overrideEligible: true
                 )
             ],
-            ageStatus: .eligible(ageDays: 30),
-            notes: [],
-            release: nil,
-            scannedTag: "v1.1.0",
-            lockfilesFound: ["package-lock.json"]
+            reasons: ["review_required"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
         )
-        if case let .skip(reason) = SecurityScan.autoRenewDecision(result: elevated, securityReviewEnabled: true) {
-            XCTAssertTrue(reason.localizedCaseInsensitiveContains("finding"))
-        } else {
-            XCTFail("Expected skip for elevated findings")
-        }
+        XCTAssertFalse(review.allowsAutoRenew)
+        XCTAssertTrue(review.needsManualDecision)
 
-        // Review disabled: age still blocks, elevated findings do not.
-        XCTAssertEqual(
-            SecurityScan.autoRenewDecision(result: elevated, securityReviewEnabled: false),
-            .proceed
-        )
-        if case .skip = SecurityScan.autoRenewDecision(result: tooNew, securityReviewEnabled: false) {
-            // ok
-        } else {
-            XCTFail("Age floor still applies when review is disabled")
-        }
-
-        let local = SecurityScanResult(
+        let blocked = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .blocked,
+            installEligibility: .deny,
+            reportID: "r3",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "c", count: 64),
+            limitations: [],
+            findingsSummary: [:],
             findings: [],
-            ageStatus: .notApplicable,
-            notes: ["Local IPA"],
-            release: nil,
-            scannedTag: nil,
-            lockfilesFound: []
+            reasons: ["blocked"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
         )
-        XCTAssertEqual(
-            SecurityScan.autoRenewDecision(result: local, securityReviewEnabled: true),
-            .proceed
-        )
-
-        let unknownAge = SecurityScanResult(
-            findings: [],
-            ageStatus: .unknown,
-            notes: [],
-            release: nil,
-            scannedTag: "v0.0.1",
-            lockfilesFound: []
-        )
-        if case .skip = SecurityScan.autoRenewDecision(result: unknownAge, securityReviewEnabled: true) {
-            // ok
-        } else {
-            XCTFail("Unknown age should skip auto-renew")
-        }
+        XCTAssertFalse(blocked.allowsAutoRenew)
+        let mapped = SecurityScanResult.fromEligibility(blocked, publishedAt: nil)
+        XCTAssertFalse(mapped.allowsProceedAnyway)
     }
 
-    func testPinnedTooNewAllowsManualProceedButBlocksAuto() {
-        let tooNewPinned = SecurityScanResult(
-            findings: [],
-            ageStatus: .tooNew(ageDays: 1, requiredDays: 14),
-            notes: [],
-            release: nil,
-            scannedTag: "v1",
-            lockfilesFound: []
+    func testOfflineRenewPolicyGraceWindow() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertTrue(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .checksPassed,
+                localCheckedAt: now.addingTimeInterval(-24 * 3600),
+                now: now
+            )
         )
-        XCTAssertTrue(tooNewPinned.allowsProceedAnyway)
-        XCTAssertTrue(tooNewPinned.needsManualDecision)
-        XCTAssertFalse(tooNewPinned.allowsAutoRenew)
+        XCTAssertFalse(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .checksPassed,
+                localCheckedAt: now.addingTimeInterval(-100 * 3600),
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .blocked,
+                localCheckedAt: now.addingTimeInterval(-1 * 3600),
+                now: now
+            )
+        )
+        XCTAssertEqual(OfflineRenewPolicy.graceHours, 72)
+    }
 
-        let vulnOnly = SecurityScanResult(
-            findings: [
-                SecurityFinding(
-                    id: "x",
-                    packageName: "foo",
-                    packageVersion: "1.0.0",
-                    ecosystem: "npm",
-                    severity: .medium,
-                    summary: "issue",
-                    advisoryID: nil
-                )
-            ],
-            ageStatus: .eligible(ageDays: 20),
-            notes: [],
-            release: nil,
-            scannedTag: "v1",
-            lockfilesFound: ["package-lock.json"]
+    func testIncompleteScanDoesNotAllowProceed() {
+        let incomplete = EligibilityResult(
+            scanStatus: .failed,
+            assessmentStatus: .incomplete,
+            installEligibility: .deny,
+            reportID: nil,
+            reportSha256: nil,
+            ipaSha256: String(repeating: "d", count: 64),
+            limitations: ["scan_failed"],
+            findingsSummary: [:],
+            findings: [],
+            reasons: ["scan_failed"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
         )
-        XCTAssertTrue(vulnOnly.allowsProceedAnyway)
-        XCTAssertTrue(vulnOnly.needsManualDecision)
-        XCTAssertFalse(vulnOnly.allowsAutoRenew)
+        let result = SecurityScanResult.fromEligibility(incomplete, publishedAt: Date())
+        XCTAssertFalse(result.allowsAutoRenew)
+        XCTAssertFalse(result.allowsProceedAnyway)
+        XCTAssertEqual(result.eligibility?.installEligibility, .deny)
     }
 
     func testConfigSecurityReviewDefaultsOn() {
@@ -565,142 +474,4 @@ final class RenewioTests: XCTestCase {
         XCTAssertFalse(due.contains(where: { $0.id == disabled.id }))
     }
 
-    // MARK: - Unpinned one-step vuln fallback
-
-    private func makeEligibleRelease(tag: String, version: String, ageDays: Int, now: Date) -> ReleaseOption {
-        ReleaseOption(
-            tag: tag,
-            version: version,
-            assetName: "App-\(version)-unsigned.ipa",
-            sizeBytes: 10,
-            isCached: false,
-            publishedAt: now.addingTimeInterval(-TimeInterval(ageDays) * 24 * 60 * 60)
-        )
-    }
-
-    private func makeScan(
-        release: ReleaseOption,
-        elevated: Bool,
-        now: Date = Date(timeIntervalSince1970: 1_700_000_000)
-    ) -> SecurityScanResult {
-        let findings: [SecurityFinding]
-        if elevated {
-            findings = [
-                SecurityFinding(
-                    id: "GHSA-\(release.version)",
-                    packageName: "dep",
-                    packageVersion: "1.0.0",
-                    ecosystem: "npm",
-                    severity: .high,
-                    summary: "test",
-                    advisoryID: "GHSA-test"
-                )
-            ]
-        } else {
-            findings = []
-        }
-        return SecurityScanResult(
-            findings: findings,
-            ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: release.publishedAt, now: now),
-            notes: [],
-            release: release,
-            scannedTag: release.tag,
-            lockfilesFound: ["package-lock.json"]
-        )
-    }
-
-    func testUnpinnedFallbackUsesPriorWhenNewestHasElevatedFindings() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
-        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: makeScan(release: newest, elevated: true, now: now),
-            priorEligible: prior,
-            priorScan: makeScan(release: prior, elevated: false, now: now),
-            isAutoRenew: true
-        )
-        guard case let .use(chosen, result, fellBackFrom) = decision else {
-            return XCTFail("Expected use of prior eligible")
-        }
-        XCTAssertEqual(chosen.tag, "v1.9.0")
-        XCTAssertEqual(fellBackFrom?.tag, "v2.0.0")
-        XCTAssertFalse(result.hasElevatedFindings)
-        XCTAssertTrue(result.notes.contains(where: { $0.contains("Fell back") }))
-        XCTAssertEqual(SecurityScan.maxVulnFallbackSteps, 1)
-    }
-
-    func testUnpinnedFallbackSkipsAutoWhenPriorAlsoUnclean() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
-        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: makeScan(release: newest, elevated: true, now: now),
-            priorEligible: prior,
-            priorScan: makeScan(release: prior, elevated: true, now: now),
-            isAutoRenew: true
-        )
-        guard case let .skip(reason) = decision else {
-            return XCTFail("Expected auto skip when both unclean")
-        }
-        XCTAssertTrue(reason.localizedCaseInsensitiveContains("prior"))
-        XCTAssertTrue(reason.localizedCaseInsensitiveContains("no further fallback"))
-    }
-
-    func testUnpinnedFallbackManualReviewWhenPriorMissing() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: makeScan(release: newest, elevated: true, now: now),
-            priorEligible: nil,
-            priorScan: nil,
-            isAutoRenew: false
-        )
-        guard case let .needsReview(release, result, note) = decision else {
-            return XCTFail("Expected manual review when no prior eligible")
-        }
-        XCTAssertEqual(release.tag, "v2.0.0")
-        XCTAssertTrue(result.hasElevatedFindings)
-        XCTAssertNotNil(note)
-        XCTAssertTrue(note?.contains("No older eligible") == true)
-    }
-
-    func testUnpinnedFallbackUsesNewestWhenClean() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let newest = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 20, now: now)
-        let prior = makeEligibleRelease(tag: "v1.9.0", version: "1.9.0", ageDays: 40, now: now)
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: makeScan(release: newest, elevated: false, now: now),
-            priorEligible: prior,
-            priorScan: nil,
-            isAutoRenew: true
-        )
-        guard case let .use(chosen, _, fellBackFrom) = decision else {
-            return XCTFail("Expected newest when clean")
-        }
-        XCTAssertEqual(chosen.tag, "v2.0.0")
-        XCTAssertNil(fellBackFrom)
-    }
-
-    func testUnpinnedFallbackManualReviewWhenPriorUncleanDoesNotWalkFurther() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let newest = makeEligibleRelease(tag: "v3.0.0", version: "3.0.0", ageDays: 15, now: now)
-        let prior = makeEligibleRelease(tag: "v2.0.0", version: "2.0.0", ageDays: 30, now: now)
-        // A third older release must never be considered by the decision helper (caller only passes one prior).
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: makeScan(release: newest, elevated: true, now: now),
-            priorEligible: prior,
-            priorScan: makeScan(release: prior, elevated: true, now: now),
-            isAutoRenew: false
-        )
-        guard case let .needsReview(release, _, note) = decision else {
-            return XCTFail("Expected manual review after one failed prior")
-        }
-        XCTAssertEqual(release.tag, "v3.0.0")
-        XCTAssertTrue(note?.contains("No further fallback") == true)
-    }
 }

@@ -19,6 +19,12 @@
 		B1000000000000000000000C /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
 		B10000000000000000000010 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* SystemServices.swift */; };
 		B10000000000000000000011 /* SecurityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* SecurityScan.swift */; };
+		B10000000000000000000031 /* ArtifactHasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000031 /* ArtifactHasher.swift */; };
+		B10000000000000000000032 /* Eligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000032 /* Eligibility.swift */; };
+		B10000000000000000000033 /* ApprovalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000033 /* ApprovalStore.swift */; };
+		B10000000000000000000034 /* SecurityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000034 /* SecurityConfig.swift */; };
+		B10000000000000000000035 /* SecurityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000035 /* SecurityClient.swift */; };
+		B10000000000000000000036 /* IPADownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000036 /* IPADownloader.swift */; };
 		B10000000000000000000009 /* renewio.sh in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* renewio.sh */; };
 		B1000000000000000000000A /* ProvisioningStub in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* ProvisioningStub */; };
 		B1000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* Assets.xcassets */; };
@@ -34,6 +40,12 @@
 		B10000000000000000000028 /* ExpiryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* ExpiryNotifier.swift */; };
 		B10000000000000000000029 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* SystemServices.swift */; };
 		B1000000000000000000002A /* SecurityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* SecurityScan.swift */; };
+		B10000000000000000000041 /* ArtifactHasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000031 /* ArtifactHasher.swift */; };
+		B10000000000000000000042 /* Eligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000032 /* Eligibility.swift */; };
+		B10000000000000000000043 /* ApprovalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000033 /* ApprovalStore.swift */; };
+		B10000000000000000000044 /* SecurityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000034 /* SecurityConfig.swift */; };
+		B10000000000000000000045 /* SecurityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000035 /* SecurityClient.swift */; };
+		B10000000000000000000046 /* IPADownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000036 /* IPADownloader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +71,12 @@
 		B2000000000000000000000C /* ExpiryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpiryNotifier.swift; sourceTree = "<group>"; };
 		B20000000000000000000010 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
 		B20000000000000000000011 /* SecurityScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityScan.swift; sourceTree = "<group>"; };
+		B20000000000000000000031 /* ArtifactHasher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactHasher.swift; sourceTree = "<group>"; };
+		B20000000000000000000032 /* Eligibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Eligibility.swift; sourceTree = "<group>"; };
+		B20000000000000000000033 /* ApprovalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalStore.swift; sourceTree = "<group>"; };
+		B20000000000000000000034 /* SecurityConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityConfig.swift; sourceTree = "<group>"; };
+		B20000000000000000000035 /* SecurityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityClient.swift; sourceTree = "<group>"; };
+		B20000000000000000000036 /* IPADownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPADownloader.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* renewio.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "renewio.sh"; sourceTree = "<group>"; };
 		B2000000000000000000000A /* ProvisioningStub */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ProvisioningStub; sourceTree = "<group>"; };
 		B2000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -112,8 +130,22 @@
 				B2000000000000000000000C /* ExpiryNotifier.swift */,
 				B20000000000000000000010 /* SystemServices.swift */,
 				B20000000000000000000011 /* SecurityScan.swift */,
+				B50000000000000000000006 /* Security */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		B50000000000000000000006 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000031 /* ArtifactHasher.swift */,
+				B20000000000000000000032 /* Eligibility.swift */,
+				B20000000000000000000033 /* ApprovalStore.swift */,
+				B20000000000000000000034 /* SecurityConfig.swift */,
+				B20000000000000000000035 /* SecurityClient.swift */,
+				B20000000000000000000036 /* IPADownloader.swift */,
+			);
+			path = Security;
 			sourceTree = "<group>";
 		};
 		B50000000000000000000003 /* Resources */ = {
@@ -274,6 +306,12 @@
 				B1000000000000000000000C /* ExpiryNotifier.swift in Sources */,
 				B10000000000000000000010 /* SystemServices.swift in Sources */,
 				B10000000000000000000011 /* SecurityScan.swift in Sources */,
+				B10000000000000000000031 /* ArtifactHasher.swift in Sources */,
+				B10000000000000000000032 /* Eligibility.swift in Sources */,
+				B10000000000000000000033 /* ApprovalStore.swift in Sources */,
+				B10000000000000000000034 /* SecurityConfig.swift in Sources */,
+				B10000000000000000000035 /* SecurityClient.swift in Sources */,
+				B10000000000000000000036 /* IPADownloader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,6 +330,12 @@
 				B10000000000000000000028 /* ExpiryNotifier.swift in Sources */,
 				B10000000000000000000029 /* SystemServices.swift in Sources */,
 				B1000000000000000000002A /* SecurityScan.swift in Sources */,
+				B10000000000000000000041 /* ArtifactHasher.swift in Sources */,
+				B10000000000000000000042 /* Eligibility.swift in Sources */,
+				B10000000000000000000043 /* ApprovalStore.swift in Sources */,
+				B10000000000000000000044 /* SecurityConfig.swift in Sources */,
+				B10000000000000000000045 /* SecurityClient.swift in Sources */,
+				B10000000000000000000046 /* IPADownloader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

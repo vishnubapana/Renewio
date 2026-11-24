@@ -36,6 +36,10 @@ struct OnboardingView: View {
     @State private var githubTokenInput = ""
     @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
     @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
+    @State private var securityEmail = ""
+    @State private var securityOTP = ""
+    @State private var securityOTPSent = false
+    @State private var securityBusy = false
 
     /// Scroll anchor to restore when the edit panel closes.
     @State private var scrollRestoreID: String?
@@ -672,9 +676,11 @@ struct OnboardingView: View {
 
                 PreferenceToggleRow(
                     title: "Require security review",
-                    subtitle: "Scan GitHub lockfiles with OSV before install; review findings before Proceed",
+                    subtitle: "Download IPA, hash it, and require a shared security report before resign/install",
                     isOn: $securityReviewEnabled
                 )
+
+                securityAccountSection
 
                 Text("Auto / Latest targets releases at least 14 days old. Pin a newer tag in Settings if you want to install sooner.")
                     .font(.system(size: 10))
@@ -1004,6 +1010,80 @@ struct OnboardingView: View {
         } catch {
             launchAtLogin = LaunchAtLoginManager.isEnabled
             errorMessage = "Launch at Login failed: \(error.localizedDescription)"
+        }
+    }
+
+    @ViewBuilder
+    private var securityAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Security account")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(RenewioTheme.foreground)
+            Text(
+                SecurityConfig.isConfigured
+                    ? "Sign in to request shared security scans (magic link OTP)."
+                    : "Set RenewioSupabaseURL / RenewioSupabaseAnonKey in Info.plist to enable shared scanning."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(RenewioTheme.mutedForeground)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if model.securityClient.isSignedIn {
+                HStack {
+                    Text(model.securityClient.userEmail ?? "Signed in")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(RenewioTheme.success)
+                    Spacer()
+                    Button("Sign out") {
+                        model.securityClient.signOut()
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            } else if SecurityConfig.isConfigured {
+                TextField("Email", text: $securityEmail)
+                    .textFieldStyle(.roundedBorder)
+                if securityOTPSent {
+                    TextField("One-time code", text: $securityOTP)
+                        .textFieldStyle(.roundedBorder)
+                    Button(securityBusy ? "Verifying…" : "Verify code") {
+                        Task { await verifySecurityOTP() }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(securityBusy || securityOTP.isEmpty)
+                } else {
+                    Button(securityBusy ? "Sending…" : "Send sign-in code") {
+                        Task { await sendSecurityOTP() }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(securityBusy || securityEmail.isEmpty)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func sendSecurityOTP() async {
+        securityBusy = true
+        defer { securityBusy = false }
+        do {
+            try await model.securityClient.signInWithOTP(email: securityEmail)
+            securityOTPSent = true
+            showTemporaryInfo("Check your email for a one-time code.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func verifySecurityOTP() async {
+        securityBusy = true
+        defer { securityBusy = false }
+        do {
+            try await model.securityClient.verifyOTP(email: securityEmail, token: securityOTP)
+            securityOTP = ""
+            securityOTPSent = false
+            showTemporaryInfo("Signed in for shared security scanning.")
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

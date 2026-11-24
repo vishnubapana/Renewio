@@ -22,8 +22,8 @@ enum MenuBarUrgency: Equatable {
 }
 
 /// Pending pre-install security review awaiting Proceed / Reject in the menu popover.
-struct PendingSecurityReview: Equatable {
-    enum Mode: Equatable {
+struct PendingSecurityReview {
+    enum Mode {
         case single
         case batch(remaining: [TrackedAppInstall])
     }
@@ -32,7 +32,7 @@ struct PendingSecurityReview: Equatable {
     let device: TrackedDevice
     let teamID: String
     let result: SecurityScanResult
-    /// Install passed to RenewRunner (may pin the resolved eligible tag).
+    /// Install passed to RenewRunner (verified original IPA path + tag).
     let resolvedInstall: TrackedAppInstall
     let mode: Mode
     /// True while a scan is still running for this install card.
@@ -43,6 +43,8 @@ struct PendingSecurityReview: Equatable {
 final class AppModel: ObservableObject {
     let configStore = ConfigStore()
     let renewRunner = RenewRunner()
+    let securityClient = SecurityClient()
+    let approvalStore = ApprovalStore()
 
     @Published var showOnboarding = false
     @Published var availableVersions: [ReleaseOption] = []
@@ -64,6 +66,8 @@ final class AppModel: ObservableObject {
     private var menuBarTimer: Timer?
     private var lastUpdateCheckAt: Date?
     private var lastAutoRenewAttemptByInstall: [UUID: Date] = [:]
+    /// Pending security metadata to persist after a successful resign/install.
+    private var pendingSecurityByInstall: [UUID: (sha: String, reportID: String?, reportSha: String?, assessment: String?)] = [:]
     private var successCallback: RenewRunner.SuccessCallback {
         { [weak self] installID, version, tag, assetName, expiresAt in
             self?.recordSuccess(
@@ -251,20 +255,71 @@ final class AppModel: ObservableObject {
         } else {
             remaining = []
         }
+        let eligibility = pending.result.eligibility
         pendingSecurityReview = nil
         securityScanningInstallID = nil
 
-        renewRunner.renew(
-            install: install,
-            device: device,
-            teamID: teamID,
-            onSuccess: successCallback
-        )
-
-        guard !remaining.isEmpty else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // Wait for this renew to start, then finish, before scanning the rest.
+            if let eligibility,
+               let reportID = eligibility.reportID,
+               eligibility.installEligibility == .allowWithApproval {
+                do {
+                    try await self.securityClient.recordApproval(
+                        ipaSha256: eligibility.ipaSha256,
+                        reportID: reportID,
+                        findingIDs: eligibility.findings.map(\.id)
+                    )
+                    self.approvalStore.save(
+                        LocalApprovalSnapshot(
+                            artifactSha256: eligibility.ipaSha256,
+                            reportID: reportID,
+                            reportSha256: eligibility.reportSha256 ?? "",
+                            findingIDs: eligibility.findings.map(\.id),
+                            approvedAt: Date(),
+                            expiresAt: Date().addingTimeInterval(30 * 24 * 60 * 60),
+                            assessmentStatus: eligibility.assessmentStatus?.rawValue ?? "review_required"
+                        )
+                    )
+                } catch {
+                    self.renewRunner.surfacePreflightFailure(
+                        install: install,
+                        message: "Could not record approval: \(error.localizedDescription)"
+                    )
+                    return
+                }
+            }
+
+            // Re-verify hash before resign.
+            if let path = install.localIPAPath,
+               let expected = self.pendingSecurityByInstall[install.id]?.sha
+                ?? eligibility?.ipaSha256 {
+                do {
+                    let ok = try ArtifactHasher.matches(fileAt: URL(fileURLWithPath: path), expectedHex: expected)
+                    if !ok {
+                        self.renewRunner.surfacePreflightFailure(
+                            install: install,
+                            message: SecurityClientError.hashMismatch.localizedDescription
+                        )
+                        return
+                    }
+                } catch {
+                    self.renewRunner.surfacePreflightFailure(
+                        install: install,
+                        message: error.localizedDescription
+                    )
+                    return
+                }
+            }
+
+            self.renewRunner.renew(
+                install: install,
+                device: device,
+                teamID: teamID,
+                onSuccess: self.successCallback
+            )
+
+            guard !remaining.isEmpty else { return }
             try? await Task.sleep(nanoseconds: 150_000_000)
             while self.renewRunner.isRunning {
                 try? await Task.sleep(nanoseconds: 250_000_000)
@@ -306,7 +361,7 @@ final class AppModel: ObservableObject {
         securityScanningInstallID = nil
     }
 
-    /// Resolve release → age + optional OSV scan (+ one-step unpinned vuln fallback) → proceed or prompt.
+    /// Download original IPA → hash → shared security report → proceed / review / deny.
     private func beginRenewWithSecurityGate(
         installs: [TrackedAppInstall],
         device: TrackedDevice,
@@ -334,7 +389,6 @@ final class AppModel: ObservableObject {
                 renewRunner.surfacePreflightFailure(install: install, message: message)
                 continue
             case let .skip(reason):
-                // Manual path should not skip silently — surface as failure.
                 renewRunner.surfacePreflightFailure(install: install, message: reason)
                 continue
             case let .review(resolvedInstall, result):
@@ -358,7 +412,6 @@ final class AppModel: ObservableObject {
                     return
                 }
 
-                // Collect consecutive clean installs into one renewAll, stop at first that needs review.
                 var cleanBatch = [resolvedInstall]
                 while !queue.isEmpty {
                     let next = queue.removeFirst()
@@ -414,176 +467,195 @@ final class AppModel: ObservableObject {
         case skip(reason: String)
     }
 
-    /// Scans and selects a release. Unpinned: newest eligible, then at most one older eligible on elevated OSV.
-    /// Pinned: no silent fallback.
+    /// Shared security gate: download → hash → request/poll report → eligibility.
     private func evaluateInstallForGate(
         install: TrackedAppInstall,
         reviewEnabled: Bool,
-        isAutoRenew: Bool
+        isAutoRenew: Bool,
+        preferSameVersion: Bool = false
     ) async -> GateOutcome {
-        if install.isLocalIPA {
-            let result: SecurityScanResult
-            if reviewEnabled {
-                result = await SecurityScan.evaluate(install: install, release: nil)
-            } else {
-                result = SecurityScanResult(
-                    findings: [],
-                    ageStatus: .notApplicable,
-                    notes: ["Local IPA — security review disabled."],
-                    release: nil,
-                    scannedTag: nil,
-                    lockfilesFound: []
-                )
-            }
-            if reviewEnabled && result.needsManualDecision {
-                return .review(install: install, result: result)
-            }
-            return .proceed(install: install, result: result)
-        }
-
-        guard GitHubSource.normalize(install.githubRepo) != nil else {
-            return .failed(message: "No valid GitHub repository configured.")
-        }
-
-        let pinned = (install.selectedTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pinned.isEmpty {
-            return await evaluatePinnedInstall(
-                install: install,
-                pinnedTag: pinned,
-                reviewEnabled: reviewEnabled,
-                isAutoRenew: isAutoRenew
-            )
-        }
-
-        return await evaluateUnpinnedInstall(
-            install: install,
-            reviewEnabled: reviewEnabled,
-            isAutoRenew: isAutoRenew
-        )
-    }
-
-    private func evaluatePinnedInstall(
-        install: TrackedAppInstall,
-        pinnedTag: String,
-        reviewEnabled: Bool,
-        isAutoRenew: Bool
-    ) async -> GateOutcome {
-        let release: ReleaseOption
-        do {
-            if let fetched = try await ConfigStore.fetchRelease(repo: install.githubRepo, tag: pinnedTag) {
-                release = fetched
-            } else {
-                release = ReleaseOption(
-                    tag: pinnedTag,
-                    version: pinnedTag,
-                    assetName: "",
-                    sizeBytes: 0,
-                    isCached: false,
-                    publishedAt: nil
-                )
-            }
-        } catch {
-            return .failed(message: "Could not resolve release \(pinnedTag): \(error.localizedDescription)")
-        }
-
-        let result: SecurityScanResult
-        if reviewEnabled {
-            result = await SecurityScan.evaluate(install: install, release: release)
+        // Same-version renew: keep current tag when possible (Phase 4).
+        let preferTag: String?
+        if preferSameVersion || isAutoRenew {
+            preferTag = install.selectedTag ?? install.lastInstalledTag
+        } else if let pinned = install.selectedTag?.trimmingCharacters(in: .whitespacesAndNewlines), !pinned.isEmpty {
+            preferTag = pinned
         } else {
-            result = SecurityScanResult(
-                findings: [],
-                ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: release.publishedAt),
-                notes: ["OSS scan skipped — security review disabled in Settings."],
-                release: release,
-                scannedTag: release.tag,
-                lockfilesFound: []
-            )
+            preferTag = nil
         }
 
-        if isAutoRenew {
-            switch SecurityScan.autoRenewDecision(result: result, securityReviewEnabled: reviewEnabled) {
-            case .proceed:
-                return .proceed(install: install, result: result)
-            case let .skip(reason):
-                return .skip(reason: reason)
-            }
-        }
-
-        if reviewEnabled && result.needsManualDecision {
-            return .review(install: install, result: result)
-        }
-        return .proceed(install: install, result: result)
-    }
-
-    private func evaluateUnpinnedInstall(
-        install: TrackedAppInstall,
-        reviewEnabled: Bool,
-        isAutoRenew: Bool
-    ) async -> GateOutcome {
-        let eligible: [ReleaseOption]
+        let downloaded: DownloadedIPA
         do {
-            eligible = try await ConfigStore.fetchEligibleReleases(repo: install.githubRepo)
+            if let preferTag, !preferTag.isEmpty, !install.isLocalIPA {
+                downloaded = try await IPADownloader.downloadTag(install: install, tag: preferTag)
+            } else {
+                downloaded = try await IPADownloader.downloadForSecurityGate(install: install, preferTag: preferTag)
+            }
         } catch {
-            return .failed(message: "Could not resolve eligible releases: \(error.localizedDescription)")
-        }
-        guard let newest = eligible.first else {
-            return .failed(
-                message: "No GitHub release with an .ipa is at least \(ReleaseAgePolicy.minimumAgeDays) days old."
-            )
+            return .failed(message: error.localizedDescription)
         }
 
-        // Review off: age floor only — no OSV, no vuln fallback.
+        var resolved = install
+        resolved.selectedTag = downloaded.tag
+        // Force resign from the exact assessed original IPA (not a re-fetch).
+        resolved.localIPAPath = downloaded.localURL.path
+
         if !reviewEnabled {
-            var resolved = install
-            resolved.selectedTag = newest.tag
             let result = SecurityScanResult(
                 findings: [],
-                ageStatus: ReleaseAgePolicy.ageStatus(publishedAt: newest.publishedAt),
-                notes: ["OSS scan skipped — security review disabled in Settings."],
-                release: newest,
-                scannedTag: newest.tag,
-                lockfilesFound: []
+                ageStatus: install.isLocalIPA
+                    ? .notApplicable
+                    : ReleaseAgePolicy.ageStatus(publishedAt: downloaded.publishedAt),
+                notes: ["Shared security scan skipped — Require security review is off."],
+                release: nil,
+                scannedTag: downloaded.tag,
+                lockfilesFound: [],
+                eligibility: nil
             )
-            if isAutoRenew {
-                switch SecurityScan.autoRenewDecision(result: result, securityReviewEnabled: false) {
-                case .proceed:
-                    return .proceed(install: resolved, result: result)
-                case let .skip(reason):
-                    return .skip(reason: reason)
+            if isAutoRenew, result.ageStatus.blocksAutomaticInstall {
+                return .skip(reason: result.ageStatus.summary)
+            }
+            pendingSecurityByInstall[install.id] = (downloaded.sha256, nil, nil, "skipped_review_disabled")
+            return .proceed(install: resolved, result: result)
+        }
+
+        // Offline grace for same-artifact renew when backend unreachable.
+        if isAutoRenew || preferSameVersion,
+           let sha = install.lastIpaSha256?.lowercased(),
+           sha == downloaded.sha256.lowercased(),
+           let assessmentRaw = install.lastAssessmentStatus,
+           let assessment = AssessmentStatus(rawValue: assessmentRaw),
+           let checkedAt = TrackedAppInstall.parseISO8601(install.lastSecurityCheckedAt),
+           OfflineRenewPolicy.allowsSameArtifactRenew(localAssessment: assessment, localCheckedAt: checkedAt) {
+            if assessment == .checksPassed || approvalStore.approval(forSha: sha) != nil {
+                let elig = EligibilityResult(
+                    scanStatus: .succeeded,
+                    assessmentStatus: assessment,
+                    installEligibility: .allow,
+                    reportID: install.lastReportId,
+                    reportSha256: install.lastReportSha256,
+                    ipaSha256: sha,
+                    limitations: ["offline_grace"],
+                    findingsSummary: [:],
+                    findings: [],
+                    reasons: ["offline_grace"],
+                    reportJSON: nil,
+                    userApprovalState: approvalStore.approval(forSha: sha) != nil ? "valid" : nil,
+                    offlineGrace: true
+                )
+                pendingSecurityByInstall[install.id] = (sha, install.lastReportId, install.lastReportSha256, assessmentRaw)
+                return .proceed(install: resolved, result: .fromEligibility(elig, publishedAt: downloaded.publishedAt))
+            }
+        }
+
+        guard SecurityConfig.isConfigured else {
+            return .failed(message: SecurityClientError.notConfigured.localizedDescription)
+        }
+        guard securityClient.isSignedIn else {
+            return .failed(message: SecurityClientError.notSignedIn.localizedDescription)
+        }
+
+        do {
+            if !install.isLocalIPA {
+                let pub: String?
+                if let d = downloaded.publishedAt {
+                    let f = ISO8601DateFormatter()
+                    f.formatOptions = [.withInternetDateTime]
+                    pub = f.string(from: d)
+                } else {
+                    pub = nil
+                }
+                let req = ScanRequestBody(
+                    ipaSha256: downloaded.sha256,
+                    githubOwner: downloaded.owner,
+                    githubRepo: downloaded.repo,
+                    releaseTag: downloaded.tag,
+                    sourceCommit: nil,
+                    assetId: downloaded.assetID,
+                    assetName: downloaded.assetName,
+                    publishedAt: pub,
+                    policyVersion: SecurityConfig.policyVersion
+                )
+                let scanResp = try await securityClient.requestScan(req)
+                if let status = scanResp.scanStatus ?? scanResp.status,
+                   status == "queued" || status == "scanning" {
+                    _ = try await securityClient.pollUntilComplete(
+                        jobID: scanResp.jobId,
+                        ipaSha256: downloaded.sha256
+                    )
                 }
             }
-            return .proceed(install: resolved, result: result)
-        }
 
-        let newestScan = await SecurityScan.evaluate(install: install, release: newest)
-        var prior: ReleaseOption?
-        var priorScan: SecurityScanResult?
-        // Hard limit: only the single next-older eligible (index 1), never walk further.
-        if newestScan.hasElevatedFindings, eligible.count > SecurityScan.maxVulnFallbackSteps {
-            let candidate = eligible[SecurityScan.maxVulnFallbackSteps]
-            prior = candidate
-            priorScan = await SecurityScan.evaluate(install: install, release: candidate)
-        }
+            let eligibility = try await securityClient.checkEligibility(
+                ipaSha256: downloaded.sha256,
+                isAutoRenew: isAutoRenew,
+                localReportSha256: install.lastReportSha256,
+                localAssessmentStatus: install.lastAssessmentStatus,
+                localCheckedAt: TrackedAppInstall.parseISO8601(install.lastSecurityCheckedAt)
+            )
 
-        let decision = SecurityScan.decideUnpinnedVulnFallback(
-            newestEligible: newest,
-            newestScan: newestScan,
-            priorEligible: prior,
-            priorScan: priorScan,
-            isAutoRenew: isAutoRenew
-        )
+            // Fail closed on incomplete / failed / denied.
+            let result = SecurityScanResult.fromEligibility(eligibility, publishedAt: downloaded.publishedAt)
+            pendingSecurityByInstall[install.id] = (
+                downloaded.sha256,
+                eligibility.reportID,
+                eligibility.reportSha256,
+                eligibility.assessmentStatus?.rawValue
+            )
 
-        switch decision {
-        case let .use(release, result, _):
-            var resolved = install
-            resolved.selectedTag = release.tag
-            return .proceed(install: resolved, result: result)
-        case let .needsReview(release, result, _):
-            var resolved = install
-            resolved.selectedTag = release.tag
-            return .review(install: resolved, result: result)
-        case let .skip(reason):
-            return .skip(reason: reason)
+            switch eligibility.installEligibility {
+            case .allow:
+                // Final hash check before resign.
+                guard try ArtifactHasher.matches(fileAt: downloaded.localURL, expectedHex: downloaded.sha256) else {
+                    return .failed(message: SecurityClientError.hashMismatch.localizedDescription)
+                }
+                return .proceed(install: resolved, result: result)
+            case .allowWithApproval:
+                if isAutoRenew {
+                    return .skip(reason: "Review required — auto-renew will not proceed without prior approval.")
+                }
+                return .review(install: resolved, result: result)
+            case .deny:
+                let reason = eligibility.reasons.joined(separator: "; ")
+                if isAutoRenew {
+                    return .skip(reason: reason.isEmpty ? "Security policy denied install." : reason)
+                }
+                return .failed(message: reason.isEmpty ? "Security policy denied install." : reason)
+            case .pending:
+                if isAutoRenew {
+                    return .skip(reason: "Security scan still pending.")
+                }
+                return .failed(message: "Security scan did not complete.")
+            }
+        } catch {
+            // Backend outage: same-artifact renew may use offline grace; upgrades fail closed.
+            if (isAutoRenew || preferSameVersion),
+               let sha = install.lastIpaSha256?.lowercased(),
+               sha == downloaded.sha256.lowercased(),
+               let assessmentRaw = install.lastAssessmentStatus,
+               let assessment = AssessmentStatus(rawValue: assessmentRaw),
+               let checkedAt = TrackedAppInstall.parseISO8601(install.lastSecurityCheckedAt),
+               OfflineRenewPolicy.allowsSameArtifactRenew(localAssessment: assessment, localCheckedAt: checkedAt),
+               (assessment == .checksPassed || approvalStore.approval(forSha: sha) != nil) {
+                let elig = EligibilityResult(
+                    scanStatus: .succeeded,
+                    assessmentStatus: assessment,
+                    installEligibility: .allow,
+                    reportID: install.lastReportId,
+                    reportSha256: install.lastReportSha256,
+                    ipaSha256: sha,
+                    limitations: ["offline_grace_backend_error"],
+                    findingsSummary: [:],
+                    findings: [],
+                    reasons: ["offline_grace", error.localizedDescription],
+                    reportJSON: nil,
+                    userApprovalState: nil,
+                    offlineGrace: true
+                )
+                pendingSecurityByInstall[install.id] = (sha, install.lastReportId, install.lastReportSha256, assessmentRaw)
+                return .proceed(install: resolved, result: .fromEligibility(elig, publishedAt: downloaded.publishedAt))
+            }
+            return .failed(message: error.localizedDescription)
         }
     }
 
@@ -602,9 +674,22 @@ final class AppModel: ObservableObject {
             assetName: assetName,
             expiresAt: expiresAt
         )
+        if let sec = pendingSecurityByInstall.removeValue(forKey: installID),
+           let idx = config.installs.firstIndex(where: { $0.id == installID }) {
+            config.installs[idx].lastIpaSha256 = sec.sha
+            config.installs[idx].lastReportId = sec.reportID
+            config.installs[idx].lastReportSha256 = sec.reportSha
+            config.installs[idx].lastAssessmentStatus = sec.assessment
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime]
+            config.installs[idx].lastSecurityCheckedAt = f.string(from: Date())
+            // Do not persist the temporary localIPAPath used for verified resign of GitHub apps.
+            if !(config.installs[idx].githubRepo).isEmpty {
+                // Keep original localIPAPath only when install was truly local.
+            }
+        }
         try? configStore.save(config)
         ExpiryNotifier.reschedule(for: config)
-        // Clear update badge if installed version matches latest.
         if let update = availableUpdates[installID],
            Self.normalizedVersion(version) == Self.normalizedVersion(update.version) {
             availableUpdates.removeValue(forKey: installID)
@@ -741,13 +826,9 @@ final class AppModel: ObservableObject {
                 case let .failed(message):
                     notifyAutoRenewSkip(install: inst, reason: message)
                 case let .review(_, result):
-                    // Auto-renew never shows UI; treat residual review as skip.
-                    let reason: String
-                    if result.hasElevatedFindings {
-                        reason = "\(result.elevatedFindings.count) elevated OSV finding(s) after one-step fallback"
-                    } else {
-                        reason = result.notes.first ?? "Security review required"
-                    }
+                    let reason = result.notes.first
+                        ?? result.eligibility?.reasons.first
+                        ?? "Security review required"
                     notifyAutoRenewSkip(install: inst, reason: reason)
                 }
             }

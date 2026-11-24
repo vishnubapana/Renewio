@@ -620,14 +620,14 @@ private struct SecurityReviewCard: View {
     let review: PendingSecurityReview
 
     private var result: SecurityScanResult { review.result }
-    private var elevated: [SecurityFinding] { result.elevatedFindings }
+    private var elevated: [RemoteFinding] { result.elevatedFindings }
     private var ageWarn: Bool { result.ageStatus.blocksAutomaticInstall }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(
-                    "Security review",
+                    result.eligibility?.displayAssessment ?? "Security review",
                     systemImage: "shield.lefthalf.filled"
                 )
                 .font(.system(size: 12, weight: .semibold))
@@ -654,7 +654,7 @@ private struct SecurityReviewCard: View {
                     ForEach(elevated.prefix(4)) { finding in
                         Text(finding.titleLine)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(severityColor(finding.severity))
+                            .foregroundStyle(severityColor(finding.severityEnum))
                             .lineLimit(2)
                     }
                     if elevated.count > 4 {
@@ -664,7 +664,7 @@ private struct SecurityReviewCard: View {
                     }
                 }
             } else if result.findings.isEmpty {
-                Text(result.lockfilesFound.isEmpty ? "No lockfiles scanned." : "No elevated OSV findings.")
+                Text("No elevated findings in the shared security report.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             }
