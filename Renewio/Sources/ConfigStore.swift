@@ -65,6 +65,8 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
     var lastInstalledAt: String?
     var lastExpiresAt: String?
     var lastAssetName: String?
+    /// Per-app opt-in for background auto-renew. Nil → true (migration default).
+    var autoUpdateEnabled: Bool?
 
     static let defaultGitHubRepo = "bobsupra/NuvioTVOS"
     static let signingLifetime: TimeInterval = 7 * 24 * 60 * 60
@@ -81,7 +83,8 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         lastInstalledTag: String? = nil,
         lastInstalledAt: String? = nil,
         lastExpiresAt: String? = nil,
-        lastAssetName: String? = nil
+        lastAssetName: String? = nil,
+        autoUpdateEnabled: Bool? = true
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -95,6 +98,12 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         self.lastInstalledAt = lastInstalledAt
         self.lastExpiresAt = lastExpiresAt
         self.lastAssetName = lastAssetName
+        self.autoUpdateEnabled = autoUpdateEnabled
+    }
+
+    /// Whether this app participates in global Auto-renew when nearby. Missing config → true.
+    var isAutoUpdateEnabled: Bool {
+        autoUpdateEnabled ?? true
     }
 
     var isLocalIPA: Bool {

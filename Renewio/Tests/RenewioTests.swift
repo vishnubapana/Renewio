@@ -487,6 +487,84 @@ final class RenewioTests: XCTestCase {
         XCTAssertFalse(disabled.isSecurityReviewEnabled)
     }
 
+    // MARK: - Per-app auto-update
+
+    func testAutoUpdateEnabledDefaultsTrueWhenMissing() throws {
+        let json = """
+        {
+          "id": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+          "deviceID": "dev-1",
+          "name": "App",
+          "githubRepo": "owner/repo",
+          "bundleID": "com.example.app"
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TrackedAppInstall.self, from: json)
+        XCTAssertNil(decoded.autoUpdateEnabled)
+        XCTAssertTrue(decoded.isAutoUpdateEnabled)
+    }
+
+    func testAutoUpdateEnabledFalseRoundTrip() throws {
+        var install = TrackedAppInstall(
+            deviceID: "dev-1",
+            name: "App",
+            bundleID: "com.example.app",
+            autoUpdateEnabled: false
+        )
+        XCTAssertFalse(install.isAutoUpdateEnabled)
+        let data = try JSONEncoder().encode(install)
+        let decoded = try JSONDecoder().decode(TrackedAppInstall.self, from: data)
+        XCTAssertEqual(decoded.autoUpdateEnabled, false)
+        XCTAssertFalse(decoded.isAutoUpdateEnabled)
+
+        install.autoUpdateEnabled = true
+        XCTAssertTrue(install.isAutoUpdateEnabled)
+    }
+
+    func testAutoRenewFilterRespectsPerAppOff() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let expiresSoon = formatter.string(from: now.addingTimeInterval(12 * 3600))
+
+        let enabled = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            deviceID: "d1",
+            name: "On",
+            bundleID: "com.on",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: true
+        )
+        let disabled = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            deviceID: "d1",
+            name: "Off",
+            bundleID: "com.off",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: false
+        )
+        let missingField = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+            deviceID: "d1",
+            name: "Default",
+            bundleID: "com.default",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: nil
+        )
+
+        let threshold: TimeInterval = 24 * 60 * 60
+        let due = [enabled, disabled, missingField].filter { install in
+            guard install.isAutoUpdateEnabled else { return false }
+            guard let expiresAt = install.expiresAt else { return false }
+            return expiresAt.timeIntervalSince(now) <= threshold
+        }
+        XCTAssertEqual(Set(due.map(\.id)), Set([enabled.id, missingField.id]))
+        XCTAssertFalse(due.contains(where: { $0.id == disabled.id }))
+    }
+
     // MARK: - Unpinned one-step vuln fallback
 
     private func makeEligibleRelease(tag: String, version: String, ageDays: Int, now: Date) -> ReleaseOption {

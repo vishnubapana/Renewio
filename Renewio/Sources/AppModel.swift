@@ -700,6 +700,7 @@ final class AppModel: ObservableObject {
         let cooldown: TimeInterval = 4 * 60 * 60
 
         let dueInstalls = config.installs.filter { install in
+            guard install.isAutoUpdateEnabled else { return false }
             guard let expiresAt = install.expiresAt else { return false }
             guard expiresAt.timeIntervalSince(now) <= threshold else { return false }
             if let lastAttempt = lastAutoRenewAttemptByInstall[install.id],

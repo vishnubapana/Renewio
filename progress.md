@@ -35,7 +35,7 @@ xcodebuild test -project Renewio/Renewio.xcodeproj -scheme Renewio -destination 
 2. Confirm **Team ID** (auto-detected from Xcode when possible).
 3. Add paired devices (Apple TV / iPhone / iPad) from Xcode Devices and Simulators (or remove old devices).
 4. **Add app** on a device: paste a GitHub repo URL (optional pinned version via **Scan**) or pick/drop a **Local `.ipa`**, confirm Bundle ID.
-5. Configure **Launch at login**, **Auto-renew when nearby**, **Require security review**, or an optional **GitHub token** (Keychain) for private repos and higher API limits.
+5. Configure **Launch at login**, **Auto-renew when nearby** (global), per-app **Auto-update** in the app editor when global is on, **Require security review**, or an optional **GitHub token** (Keychain) for private repos and higher API limits.
 6. **Save**, then **Renew** on each app card (or **Renew all** when a device has multiple apps).
 
 ## Multi-device / multi-source model
@@ -44,7 +44,8 @@ Config v2 at `~/Library/Application Support/Renewio/config.json`:
 
 - `devices[]` — tracked UDID + platform (`tvos` / `ios` / `ipados`)
 - `installs[]` — per-device app with `githubRepo` or `localIPAPath`, `bundleID`, install history, real `lastExpiresAt` from the provisioning profile, optional `selectedTag`
-- `autoRenewEnabled` — optional background auto-renew when devices are nearby and apps are within 24h of expiry
+- `autoRenewEnabled` — global master switch for background auto-renew when devices are nearby and apps are within 24h of expiry
+- `installs[].autoUpdateEnabled` — per-app opt-in (default **true** when missing); auto-renew only includes apps with this on **and** global auto-renew enabled
 - `securityReviewEnabled` — default **on**; when on, manual renews show age/OSV review (Proceed/Reject); auto-renew skips on medium+ findings
 - Legacy v1 flat configs auto-migrate on launch (Living Room → one tvOS device + Nuvio TV install)
 - Legacy ReNuvio Application Support / Logs directories move into Renewio on first launch
@@ -59,7 +60,7 @@ Before resign/install of a GitHub-sourced IPA (manual renew, update badge, Renew
 2. **One-step vuln fallback (unpinned only)** — if the newest eligible has medium/high/critical OSV findings, try **exactly one** next-older eligible release. If that second candidate is also unclean or missing, stop (no walking further tags): auto-renew skips + notifies; manual shows review. **Pinned tags never silent-fallback.**
 3. **OSV OSS scan** — `SecurityScan.swift` fetches lockfiles at the release tag via GitHub Contents (`Package.resolved`, `Podfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.sum`, `Gemfile.lock`) and POSTs to `https://api.osv.dev/v1/querybatch` (no third-party deps).
 4. **Manual UI** — compact review card in the menu popover: age verdict, elevated findings, **Reject** / **Proceed anyway**.
-5. **Auto-renew** — never interactive; proceeds only if age OK **and** no medium/high/critical findings (after the one-step fallback); otherwise skip + local notification.
+5. **Auto-renew** — never interactive; requires global Auto-renew **and** per-app Auto-update; proceeds only if age OK **and** no medium/high/critical findings (after the one-step fallback); otherwise skip + local notification. Per-app Auto-update toggle appears in the app editor only when global Auto-renew is on.
 6. **Local `.ipa`** — no age rule; OSS scan skipped with a “no GitHub source” note unless a repo is configured.
 7. **Scripts** — `scripts/renewio.sh` and `Renewio/Resources/renewio.sh`: no `--tag` → skip young releases; explicit `--tag` installs that release even if newer than 14 days.
 

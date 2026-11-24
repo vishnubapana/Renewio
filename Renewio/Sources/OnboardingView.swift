@@ -513,6 +513,22 @@ struct OnboardingView: View {
                 }
             }
 
+            if autoRenewEnabled {
+                PreferenceToggleRow(
+                    title: "Auto-update",
+                    subtitle: "Include this app when Auto-renew runs nearby",
+                    isOn: Binding(
+                        get: {
+                            editingInstall?.isAutoUpdateEnabled ?? install.isAutoUpdateEnabled
+                        },
+                        set: { newValue in
+                            if editingInstall == nil { editingInstall = install }
+                            editingInstall?.autoUpdateEnabled = newValue
+                        }
+                    )
+                )
+            }
+
             HStack(spacing: 8) {
                 Button("Cancel") {
                     cancelAppEditor()
