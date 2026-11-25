@@ -474,6 +474,32 @@ final class RenewioTests: XCTestCase {
         XCTAssertFalse(due.contains(where: { $0.id == disabled.id }))
     }
 
+    // MARK: - IPA cache prune
+
+    func testPruneIPACacheKeepsTwoNewestPerFolder() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("renewio-prune-\(UUID().uuidString)", isDirectory: true)
+        let repo = root.appendingPathComponent("owner__App", isDirectory: true)
+        try fm.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let older = repo.appendingPathComponent("old.ipa")
+        let mid = repo.appendingPathComponent("mid.ipa")
+        let newer = repo.appendingPathComponent("new.ipa")
+        try Data("a".utf8).write(to: older)
+        try Data("b".utf8).write(to: mid)
+        try Data("c".utf8).write(to: newer)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: older.path)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: mid.path)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 300)], ofItemAtPath: newer.path)
+
+        let deleted = try ConfigStore.pruneIPACache(keepPerRepo: 2, root: root)
+        XCTAssertEqual(deleted, 1)
+        XCTAssertFalse(fm.fileExists(atPath: older.path))
+        XCTAssertTrue(fm.fileExists(atPath: mid.path))
+        XCTAssertTrue(fm.fileExists(atPath: newer.path))
+    }
+
     // MARK: - Auth error mapping
 
     func testAuthErrorMessageMapsInvalidCredentials() throws {

@@ -753,6 +753,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(cacheSizeBytes == 0)
+                    .help("Deletes all cached IPAs. Downloads keep the 2 newest per repo automatically.")
 
                     Button {
                         clearWorkScratch()
