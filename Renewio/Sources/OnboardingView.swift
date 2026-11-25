@@ -660,7 +660,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 PreferenceToggleRow(
                     title: "Launch at login",
-                    subtitle: "Keep Renewio in your menu bar after restarts",
+                    subtitle: "Stay in the menu bar after restart",
                     isOn: Binding(
                         get: { launchAtLogin },
                         set: { toggleLaunchAtLogin($0) }
@@ -669,22 +669,17 @@ struct OnboardingView: View {
 
                 PreferenceToggleRow(
                     title: "Auto-renew when nearby",
-                    subtitle: "Refresh apps within 24h of expiry if device is awake",
+                    subtitle: "Renew within 24h of expiry when the device is awake",
                     isOn: $autoRenewEnabled
                 )
 
                 PreferenceToggleRow(
                     title: "Require security review",
-                    subtitle: "Download IPA, hash it, and require a shared security report before resign/install",
+                    subtitle: "Scan the IPA before install. Auto/Latest waits 14+ days; pin a tag to install sooner.",
                     isOn: $securityReviewEnabled
                 )
 
                 securityAccountSection
-
-                Text("Auto / Latest targets releases at least 14 days old. Pin a newer tag in Settings if you want to install sooner.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(RenewioTheme.mutedForeground)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 Divider().overlay(RenewioTheme.border)
 
@@ -1020,7 +1015,7 @@ struct OnboardingView: View {
                 .foregroundStyle(RenewioTheme.foreground)
             Text(
                 SecurityConfig.isConfigured
-                    ? "Sign in with email and password to request shared security scans. No magic link required."
+                    ? "Email and password for shared security scans."
                     : "Set RenewioSupabaseURL / RenewioSupabaseAnonKey in Info.plist to enable shared scanning."
             )
             .font(.system(size: 11))
