@@ -622,6 +622,11 @@ private struct SecurityReviewCard: View {
     private var result: SecurityScanResult { review.result }
     private var elevated: [RemoteFinding] { result.elevatedFindings }
     private var ageWarn: Bool { result.ageStatus.blocksAutomaticInstall }
+    private var limitationLabels: [String] {
+        let fromEligibility = result.eligibility?.limitations ?? []
+        if !fromEligibility.isEmpty { return fromEligibility }
+        return result.notes.filter { !$0.isEmpty }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -647,39 +652,52 @@ private struct SecurityReviewCard: View {
             ageRow
 
             if !elevated.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("\(elevated.count) elevated finding\(elevated.count == 1 ? "" : "s")")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(RenewioTheme.foreground)
-                    ForEach(elevated.prefix(4)) { finding in
-                        Text(finding.titleLine)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(severityColor(finding.severityEnum))
-                            .lineLimit(2)
-                    }
-                    if elevated.count > 4 {
-                        Text("+\(elevated.count - 4) more")
-                            .font(.system(size: 10))
-                            .foregroundStyle(RenewioTheme.mutedForeground)
+                Text("\(elevated.count) elevated finding\(elevated.count == 1 ? "" : "s")")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(RenewioTheme.foreground)
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(elevated) { finding in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(finding.titleLine)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(severityColor(finding.severityEnum))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let summary = finding.summary, !summary.isEmpty {
+                                    Text(summary)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(RenewioTheme.mutedForeground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                if !finding.scanner.isEmpty {
+                                    Text(finding.scanner)
+                                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(RenewioTheme.mutedForeground.opacity(0.9))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
+                .frame(maxHeight: 160)
             } else if result.findings.isEmpty {
                 Text("No elevated findings in the shared security report.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(RenewioTheme.mutedForeground)
             }
 
-            if let note = result.notes.first {
-                Text(note)
-                    .font(.system(size: 10))
-                    .foregroundStyle(RenewioTheme.mutedForeground)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             if let tag = result.scannedTag ?? result.release?.tag {
                 Text("Tag \(tag)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(RenewioTheme.mutedForeground)
+            }
+
+            if !limitationLabels.isEmpty {
+                Text(limitationLabels.joined(separator: " · "))
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
