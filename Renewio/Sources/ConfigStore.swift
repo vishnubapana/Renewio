@@ -555,7 +555,7 @@ final class ConfigStore: ObservableObject {
         return sanitized.isEmpty ? "unknown" : sanitized
     }
 
-    static var downloadsRootURL: URL {
+    nonisolated static var downloadsRootURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Renewio/downloads", isDirectory: true)
     }
@@ -603,6 +603,9 @@ final class ConfigStore: ObservableObject {
         return freed
     }
 
+    /// Newest IPAs retained per repo download folder (and in the legacy flat root).
+    nonisolated static let defaultIPACacheKeepPerRepo = 2
+
     static func downloadsDirectoryURL(forRepo repo: String) -> URL {
         let dir = downloadsRootURL.appendingPathComponent(repoFolderName(repo), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -639,6 +642,57 @@ final class ConfigStore: ObservableObject {
         }
         try fm.createDirectory(at: downloadsRootURL, withIntermediateDirectories: true)
         return freed
+    }
+
+    /// Deletes older `.ipa` files so each directory under `root` keeps only the newest `keepPerRepo`.
+    @discardableResult
+    nonisolated static func pruneIPACache(
+        keepPerRepo: Int = defaultIPACacheKeepPerRepo,
+        root: URL? = nil
+    ) throws -> Int {
+        let keep = max(0, keepPerRepo)
+        let fm = FileManager.default
+        let rootURL = root ?? downloadsRootURL
+        guard fm.fileExists(atPath: rootURL.path) else { return 0 }
+
+        var deleted = 0
+        deleted += try pruneIPAFiles(in: rootURL, keep: keep)
+
+        let children = (try? fm.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for child in children {
+            let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            guard isDir else { continue }
+            deleted += try pruneIPAFiles(in: child, keep: keep)
+        }
+        return deleted
+    }
+
+    nonisolated private static func pruneIPAFiles(in directory: URL, keep: Int) throws -> Int {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        let ipas: [(URL, Date)] = urls.compactMap { url in
+            guard url.pathExtension.lowercased() == "ipa" else { return nil }
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true
+            else { return nil }
+            return (url, values.contentModificationDate ?? .distantPast)
+        }
+        .sorted { $0.1 > $1.1 }
+
+        let toDelete = Array(ipas.dropFirst(keep))
+        for (url, _) in toDelete {
+            try fm.removeItem(at: url)
+        }
+        return toDelete.count
     }
 
     static func listCachedVersions(forRepo repo: String, limit: Int = 3) -> [CachedVersion] {

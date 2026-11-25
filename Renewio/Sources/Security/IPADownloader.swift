@@ -82,6 +82,7 @@ enum IPADownloader {
         }
 
         let sha = try ArtifactHasher.sha256Hex(ofFileAt: dest)
+        try? ConfigStore.pruneIPACache()
         return DownloadedIPA(
             localURL: dest,
             sha256: sha,

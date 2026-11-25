@@ -698,6 +698,7 @@ final class AppModel: ObservableObject {
         }
         try? configStore.save(config)
         ExpiryNotifier.reschedule(for: config)
+        try? ConfigStore.pruneIPACache()
         if let update = availableUpdates[installID],
            Self.normalizedVersion(version) == Self.normalizedVersion(update.version) {
             availableUpdates.removeValue(forKey: installID)
