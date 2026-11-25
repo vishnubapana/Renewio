@@ -503,4 +503,19 @@ final class RenewioTests: XCTestCase {
         XCTAssertTrue(message.contains("Confirm email"))
     }
 
+    // MARK: - Work scratch cleanup
+
+    func testClearWorkScratchRemovesBulkyDirs() throws {
+        let fm = FileManager.default
+        let extract = ConfigStore.workDirectoryURL.appendingPathComponent("PayloadExtract", isDirectory: true)
+        try fm.createDirectory(at: extract, withIntermediateDirectories: true)
+        let marker = extract.appendingPathComponent("marker.bin")
+        try Data(repeating: 1, count: 2048).write(to: marker)
+        XCTAssertGreaterThan(ConfigStore.workScratchSizeBytes(), 0)
+        let freed = try ConfigStore.clearWorkScratch()
+        XCTAssertGreaterThanOrEqual(freed, 2048)
+        XCTAssertFalse(fm.fileExists(atPath: extract.path))
+        XCTAssertEqual(ConfigStore.workScratchSizeBytes(), 0)
+    }
+
 }
