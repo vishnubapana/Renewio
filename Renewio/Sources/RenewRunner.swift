@@ -136,6 +136,17 @@ final class RenewRunner: ObservableObject {
         status = .idle
     }
 
+    /// Surfaces a pre-install gate failure (age / resolve) on the install card without starting a process.
+    func surfacePreflightFailure(install: TrackedAppInstall, message: String) {
+        guard !isRunning else { return }
+        queue = []
+        isBatchRun = false
+        activeInstallID = install.id
+        currentInstallName = install.name
+        downloadProgress = nil
+        status = .failure(stage: "security", message: message)
+    }
+
     private func start(install: TrackedAppInstall, device: TrackedDevice, teamID: String) {
         guard !isRunning else { return }
         wasCancelled = false

@@ -32,9 +32,13 @@ struct OnboardingView: View {
     // Preferences & Maintenance
     @State private var launchAtLogin = LaunchAtLoginManager.isEnabled
     @State private var autoRenewEnabled = false
+    @State private var securityReviewEnabled = true
     @State private var githubTokenInput = ""
     @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
     @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
+    @State private var securityEmail = ""
+    @State private var securityPassword = ""
+    @State private var securityBusy = false
 
     /// Scroll anchor to restore when the edit panel closes.
     @State private var scrollRestoreID: String?
@@ -512,6 +516,22 @@ struct OnboardingView: View {
                 }
             }
 
+            if autoRenewEnabled {
+                PreferenceToggleRow(
+                    title: "Auto-update",
+                    subtitle: "Include this app when Auto-renew runs nearby",
+                    isOn: Binding(
+                        get: {
+                            editingInstall?.isAutoUpdateEnabled ?? install.isAutoUpdateEnabled
+                        },
+                        set: { newValue in
+                            if editingInstall == nil { editingInstall = install }
+                            editingInstall?.autoUpdateEnabled = newValue
+                        }
+                    )
+                )
+            }
+
             HStack(spacing: 8) {
                 Button("Cancel") {
                     cancelAppEditor()
@@ -653,6 +673,19 @@ struct OnboardingView: View {
                     isOn: $autoRenewEnabled
                 )
 
+                PreferenceToggleRow(
+                    title: "Require security review",
+                    subtitle: "Download IPA, hash it, and require a shared security report before resign/install",
+                    isOn: $securityReviewEnabled
+                )
+
+                securityAccountSection
+
+                Text("Auto / Latest targets releases at least 14 days old. Pin a newer tag in Settings if you want to install sooner.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Divider().overlay(RenewioTheme.border)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -767,6 +800,7 @@ struct OnboardingView: View {
             draftInstalls = existing.installs
             selectedDeviceID = existing.selectedDeviceID ?? existing.devices.first?.id
             autoRenewEnabled = existing.isAutoRenewEnabled
+            securityReviewEnabled = existing.isSecurityReviewEnabled
         }
         launchAtLogin = LaunchAtLoginManager.isEnabled
         hasSavedGitHubToken = KeychainStore.hasGitHubToken
@@ -978,6 +1012,83 @@ struct OnboardingView: View {
         }
     }
 
+    @ViewBuilder
+    private var securityAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Security account")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(RenewioTheme.foreground)
+            Text(
+                SecurityConfig.isConfigured
+                    ? "Sign in with email and password to request shared security scans. No magic link required."
+                    : "Set RenewioSupabaseURL / RenewioSupabaseAnonKey in Info.plist to enable shared scanning."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(RenewioTheme.mutedForeground)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if model.securityClient.isSignedIn {
+                HStack {
+                    Text(model.securityClient.userEmail ?? "Signed in")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(RenewioTheme.success)
+                    Spacer()
+                    PopoverIconButton(
+                        systemImage: "rectangle.portrait.and.arrow.right",
+                        hoverTint: RenewioTheme.danger,
+                        helpText: "Sign out",
+                        action: { model.securityClient.signOut() }
+                    )
+                }
+            } else if SecurityConfig.isConfigured {
+                TextField("Email", text: $securityEmail)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.username)
+                SecureField("Password", text: $securityPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.password)
+                HStack(spacing: 8) {
+                    Button(securityBusy ? "Signing in…" : "Sign in") {
+                        Task { await securitySignIn() }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(securityBusy || securityEmail.isEmpty || securityPassword.isEmpty)
+
+                    Button(securityBusy ? "Creating…" : "Create account") {
+                        Task { await securitySignUp() }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(securityBusy || securityEmail.isEmpty || securityPassword.isEmpty)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func securitySignIn() async {
+        securityBusy = true
+        defer { securityBusy = false }
+        do {
+            try await model.securityClient.signIn(email: securityEmail, password: securityPassword)
+            securityPassword = ""
+            showTemporaryInfo("Signed in for shared security scanning.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func securitySignUp() async {
+        securityBusy = true
+        defer { securityBusy = false }
+        do {
+            try await model.securityClient.signUp(email: securityEmail, password: securityPassword)
+            securityPassword = ""
+            showTemporaryInfo("Account created and signed in.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func saveGitHubToken() {
         let token = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return }
@@ -1078,7 +1189,8 @@ struct OnboardingView: View {
             devices: draftDevices,
             installs: draftInstalls,
             selectedDeviceID: selectedDeviceID ?? draftDevices.first?.id,
-            autoRenewEnabled: autoRenewEnabled
+            autoRenewEnabled: autoRenewEnabled,
+            securityReviewEnabled: securityReviewEnabled
         )
         do {
             try model.configStore.save(config)

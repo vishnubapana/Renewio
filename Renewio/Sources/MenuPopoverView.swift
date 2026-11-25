@@ -159,20 +159,26 @@ struct MenuPopoverView: View {
         }
     }
 
+    private var isBusy: Bool {
+        model.renewRunner.isRunning || model.securityScanningInstallID != nil
+    }
+
     private var renewAllRow: some View {
         HStack(spacing: 8) {
             Button {
                 model.renewAllOnSelectedDevice()
             } label: {
                 LoadingLabel(
-                    title: model.renewRunner.isRunning ? "Renewing…" : "Renew all",
-                    isLoading: model.renewRunner.isRunning
+                    title: model.renewRunner.isRunning
+                        ? "Renewing…"
+                        : (model.securityScanningInstallID != nil ? "Scanning…" : "Renew all"),
+                    isLoading: isBusy
                 )
                 .font(.system(size: 13, weight: .semibold))
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(SecondaryButtonStyle())
-            .disabled(model.renewRunner.isRunning)
+            .disabled(isBusy)
 
             if model.renewRunner.isRunning {
                 Button {
@@ -308,14 +314,26 @@ private struct AppInstallCard: View {
 
     private var isActive: Bool {
         model.renewRunner.activeInstallID == install.id
+            || model.securityScanningInstallID == install.id
+            || model.pendingSecurityReview?.install.id == install.id
     }
 
     private var isRunningThis: Bool {
-        isActive && model.renewRunner.isRunning
+        (model.renewRunner.activeInstallID == install.id && model.renewRunner.isRunning)
+            || model.securityScanningInstallID == install.id
+    }
+
+    private var isBusy: Bool {
+        model.renewRunner.isRunning || model.securityScanningInstallID != nil
     }
 
     private var availableUpdate: ReleaseOption? {
         model.availableUpdates[install.id]
+    }
+
+    private var pendingReview: PendingSecurityReview? {
+        guard model.pendingSecurityReview?.install.id == install.id else { return nil }
+        return model.pendingSecurityReview
     }
 
     var body: some View {
@@ -351,7 +369,7 @@ private struct AppInstallCard: View {
                                         .clipShape(Capsule())
                                 }
                                 .buttonStyle(RenewioPressButtonStyle())
-                                .disabled(model.renewRunner.isRunning)
+                                .disabled(isBusy)
                                 .help("Update available: \(update.displayVersion). Click to install.")
                             }
                             Spacer(minLength: 0)
@@ -408,18 +426,34 @@ private struct AppInstallCard: View {
                         .transition(.opacity)
                     }
 
-                    if isRunningThis {
+                    if model.securityScanningInstallID == install.id {
+                        InlineSpinner(tint: RenewioTheme.accent)
+                            .frame(width: 32, height: 32)
+                    } else if isRunningThis {
                         CancelIconButton {
                             model.renewRunner.cancel()
                         }
                     } else {
                         RenewIconButton(
-                            isRunning: isRunningThis,
-                            disabled: model.renewRunner.isRunning
+                            isRunning: false,
+                            disabled: isBusy || pendingReview != nil
                         ) {
                             model.renew(install: install)
                         }
                     }
+                }
+
+                if model.securityScanningInstallID == install.id {
+                    Text("Scanning release for age and known vulnerabilities…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                        .transition(.renewioExpandCollapse)
+                }
+
+                if let pendingReview {
+                    SecurityReviewCard(review: pendingReview)
+                        .environmentObject(model)
+                        .transition(.renewioExpandCollapse)
                 }
 
                 statusExtras
@@ -438,7 +472,9 @@ private struct AppInstallCard: View {
     }
 
     private var statusIdentity: String {
-        guard isActive else { return "inactive" }
+        if model.securityScanningInstallID == install.id { return "scanning" }
+        if pendingReview != nil { return "security-review" }
+        guard model.renewRunner.activeInstallID == install.id else { return "inactive" }
         switch model.renewRunner.status {
         case .idle: return "idle"
         case .running(let stage, _): return "running-\(stage?.rawValue ?? "none")"
@@ -450,7 +486,7 @@ private struct AppInstallCard: View {
 
     @ViewBuilder
     private var statusExtras: some View {
-        if isActive {
+        if model.renewRunner.activeInstallID == install.id {
             switch model.renewRunner.status {
             case let .running(stage, detail):
                 VStack(alignment: .leading, spacing: 6) {
@@ -576,6 +612,139 @@ private struct AppInstallCard: View {
     private func progressValue(for stage: RenewStage?) -> Double {
         guard let stage, let idx = RenewStage.allCases.firstIndex(of: stage) else { return 0.08 }
         return Double(idx + 1) / Double(RenewStage.allCases.count)
+    }
+}
+
+private struct SecurityReviewCard: View {
+    @EnvironmentObject private var model: AppModel
+    let review: PendingSecurityReview
+
+    private var result: SecurityScanResult { review.result }
+    private var elevated: [RemoteFinding] { result.elevatedFindings }
+    private var ageWarn: Bool { result.ageStatus.blocksAutomaticInstall }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(
+                    result.eligibility?.displayAssessment ?? "Security review",
+                    systemImage: "shield.lefthalf.filled"
+                )
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(RenewioTheme.accent)
+                Spacer()
+                Button {
+                    model.dismissSecurityReview()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(RenewioTheme.mutedForeground)
+                }
+                .buttonStyle(RenewioPressButtonStyle())
+                .help("Dismiss")
+            }
+
+            ageRow
+
+            if !elevated.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(elevated.count) elevated finding\(elevated.count == 1 ? "" : "s")")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(RenewioTheme.foreground)
+                    ForEach(elevated.prefix(4)) { finding in
+                        Text(finding.titleLine)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(severityColor(finding.severityEnum))
+                            .lineLimit(2)
+                    }
+                    if elevated.count > 4 {
+                        Text("+\(elevated.count - 4) more")
+                            .font(.system(size: 10))
+                            .foregroundStyle(RenewioTheme.mutedForeground)
+                    }
+                }
+            } else if result.findings.isEmpty {
+                Text("No elevated findings in the shared security report.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+            }
+
+            if let note = result.notes.first {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let tag = result.scannedTag ?? result.release?.tag {
+                Text("Tag \(tag)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(RenewioTheme.mutedForeground)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    model.rejectSecurityReview()
+                } label: {
+                    Text("Reject")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+
+                Button {
+                    model.proceedSecurityReview()
+                } label: {
+                    Text(ageWarn || !elevated.isEmpty ? "Proceed anyway" : "Proceed")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            CardSurface(
+                fill: RenewioTheme.accent.opacity(0.08),
+                border: RenewioTheme.accent.opacity(0.3),
+                cornerRadius: RenewioTheme.radiusLg
+            )
+        )
+    }
+
+    private var ageRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: ageIcon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(ageTint)
+            Text(result.ageStatus.summary)
+                .font(.system(size: 11))
+                .foregroundStyle(RenewioTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var ageIcon: String {
+        switch result.ageStatus {
+        case .eligible, .notApplicable: return "checkmark.circle.fill"
+        case .tooNew, .unknown: return "clock.badge.exclamationmark.fill"
+        }
+    }
+
+    private var ageTint: Color {
+        switch result.ageStatus {
+        case .eligible, .notApplicable: return RenewioTheme.success
+        case .tooNew, .unknown: return RenewioTheme.danger
+        }
+    }
+
+    private func severityColor(_ severity: SecuritySeverity) -> Color {
+        switch severity {
+        case .critical, .high: return RenewioTheme.danger
+        case .medium: return RenewioTheme.accent
+        case .low, .unknown: return RenewioTheme.mutedForeground
+        }
     }
 }
 

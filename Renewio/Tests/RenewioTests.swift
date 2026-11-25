@@ -191,4 +191,316 @@ final class RenewioTests: XCTestCase {
         XCTAssertEqual(devices.first(where: { $0.udid == "UDID-IPHONE" })?.platform, .ios)
         XCTAssertEqual(devices.first(where: { $0.udid == "UDID-IPAD" })?.platform, .ipados)
     }
+
+    // MARK: - Release age eligibility
+
+    func testReleaseAgeEligibilityExactFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-14 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .eligible(ageDays: 14))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+    }
+
+    func testReleaseAgeEligibilityYoungerThanFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-3 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .tooNew(ageDays: 3, requiredDays: 14))
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+        XCTAssertTrue(status.blocksAutomaticInstall)
+    }
+
+    func testReleaseAgeEligibilityOlderThanFourteenDays() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let published = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: published, now: now)
+        XCTAssertEqual(status, .eligible(ageDays: 30))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: published, now: now))
+    }
+
+    func testReleaseAgeEligibilityMissingDate() {
+        let status = ReleaseAgePolicy.ageStatus(publishedAt: nil)
+        XCTAssertEqual(status, .unknown)
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: nil))
+        XCTAssertTrue(status.blocksAutomaticInstall)
+    }
+
+    func testLatestEligibleSkipsTooNewReleases() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let tooNew = ReleaseOption(
+            tag: "v9.9.9",
+            version: "9.9.9",
+            assetName: "App-9.9.9-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-2 * 24 * 60 * 60)
+        )
+        let eligible = ReleaseOption(
+            tag: "v9.8.0",
+            version: "9.8.0",
+            assetName: "App-9.8.0-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-20 * 24 * 60 * 60)
+        )
+        let older = ReleaseOption(
+            tag: "v9.7.0",
+            version: "9.7.0",
+            assetName: "App-9.7.0-unsigned.ipa",
+            sizeBytes: 100,
+            isCached: false,
+            publishedAt: now.addingTimeInterval(-40 * 24 * 60 * 60)
+        )
+        let releases = [tooNew, eligible, older]
+        let latestEligible = releases.first {
+            ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now)
+        }
+        XCTAssertEqual(latestEligible?.tag, "v9.8.0")
+        XCTAssertFalse(ReleaseAgePolicy.isEligible(publishedAt: tooNew.publishedAt, now: now))
+        XCTAssertTrue(ReleaseAgePolicy.isEligible(publishedAt: eligible.publishedAt, now: now))
+    }
+
+    // MARK: - Shared security eligibility / hashing
+
+    func testArtifactHasherRoundTrip() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("renewio-hash-test.bin")
+        let payload = Data("renewio-security-hash".utf8)
+        try payload.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let hex = try ArtifactHasher.sha256Hex(ofFileAt: url)
+        XCTAssertEqual(hex.count, 64)
+        XCTAssertTrue(try ArtifactHasher.matches(fileAt: url, expectedHex: hex))
+        XCTAssertFalse(try ArtifactHasher.matches(fileAt: url, expectedHex: String(repeating: "0", count: 64)))
+    }
+
+    func testEligibilityAllowsAutoOnlyWhenChecksPassed() {
+        let passed = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .checksPassed,
+            installEligibility: .allow,
+            reportID: "r1",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "a", count: 64),
+            limitations: [],
+            findingsSummary: [:],
+            findings: [],
+            reasons: ["checks_passed"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
+        )
+        XCTAssertTrue(passed.allowsAutoRenew)
+        XCTAssertFalse(passed.needsManualDecision)
+
+        let review = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .reviewRequired,
+            installEligibility: .allowWithApproval,
+            reportID: "r2",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "b", count: 64),
+            limitations: [],
+            findingsSummary: ["medium": 1],
+            findings: [
+                RemoteFinding(
+                    id: "f1",
+                    scanner: "osv_scanner",
+                    severity: "medium",
+                    title: "dep issue",
+                    summary: "test",
+                    overrideEligible: true
+                )
+            ],
+            reasons: ["review_required"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
+        )
+        XCTAssertFalse(review.allowsAutoRenew)
+        XCTAssertTrue(review.needsManualDecision)
+
+        let blocked = EligibilityResult(
+            scanStatus: .succeeded,
+            assessmentStatus: .blocked,
+            installEligibility: .deny,
+            reportID: "r3",
+            reportSha256: nil,
+            ipaSha256: String(repeating: "c", count: 64),
+            limitations: [],
+            findingsSummary: [:],
+            findings: [],
+            reasons: ["blocked"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
+        )
+        XCTAssertFalse(blocked.allowsAutoRenew)
+        let mapped = SecurityScanResult.fromEligibility(blocked, publishedAt: nil)
+        XCTAssertFalse(mapped.allowsProceedAnyway)
+    }
+
+    func testOfflineRenewPolicyGraceWindow() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertTrue(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .checksPassed,
+                localCheckedAt: now.addingTimeInterval(-24 * 3600),
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .checksPassed,
+                localCheckedAt: now.addingTimeInterval(-100 * 3600),
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            OfflineRenewPolicy.allowsSameArtifactRenew(
+                localAssessment: .blocked,
+                localCheckedAt: now.addingTimeInterval(-1 * 3600),
+                now: now
+            )
+        )
+        XCTAssertEqual(OfflineRenewPolicy.graceHours, 72)
+    }
+
+    func testIncompleteScanDoesNotAllowProceed() {
+        let incomplete = EligibilityResult(
+            scanStatus: .failed,
+            assessmentStatus: .incomplete,
+            installEligibility: .deny,
+            reportID: nil,
+            reportSha256: nil,
+            ipaSha256: String(repeating: "d", count: 64),
+            limitations: ["scan_failed"],
+            findingsSummary: [:],
+            findings: [],
+            reasons: ["scan_failed"],
+            reportJSON: nil,
+            userApprovalState: nil,
+            offlineGrace: false
+        )
+        let result = SecurityScanResult.fromEligibility(incomplete, publishedAt: Date())
+        XCTAssertFalse(result.allowsAutoRenew)
+        XCTAssertFalse(result.allowsProceedAnyway)
+        XCTAssertEqual(result.eligibility?.installEligibility, .deny)
+    }
+
+    func testConfigSecurityReviewDefaultsOn() {
+        let config = RenewioConfig(teamID: "TEAM123456")
+        XCTAssertTrue(config.isSecurityReviewEnabled)
+        var disabled = config
+        disabled.securityReviewEnabled = false
+        XCTAssertFalse(disabled.isSecurityReviewEnabled)
+    }
+
+    // MARK: - Per-app auto-update
+
+    func testAutoUpdateEnabledDefaultsTrueWhenMissing() throws {
+        let json = """
+        {
+          "id": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+          "deviceID": "dev-1",
+          "name": "App",
+          "githubRepo": "owner/repo",
+          "bundleID": "com.example.app"
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TrackedAppInstall.self, from: json)
+        XCTAssertNil(decoded.autoUpdateEnabled)
+        XCTAssertTrue(decoded.isAutoUpdateEnabled)
+    }
+
+    func testAutoUpdateEnabledFalseRoundTrip() throws {
+        var install = TrackedAppInstall(
+            deviceID: "dev-1",
+            name: "App",
+            bundleID: "com.example.app",
+            autoUpdateEnabled: false
+        )
+        XCTAssertFalse(install.isAutoUpdateEnabled)
+        let data = try JSONEncoder().encode(install)
+        let decoded = try JSONDecoder().decode(TrackedAppInstall.self, from: data)
+        XCTAssertEqual(decoded.autoUpdateEnabled, false)
+        XCTAssertFalse(decoded.isAutoUpdateEnabled)
+
+        install.autoUpdateEnabled = true
+        XCTAssertTrue(install.isAutoUpdateEnabled)
+    }
+
+    func testAutoRenewFilterRespectsPerAppOff() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let expiresSoon = formatter.string(from: now.addingTimeInterval(12 * 3600))
+
+        let enabled = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            deviceID: "d1",
+            name: "On",
+            bundleID: "com.on",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: true
+        )
+        let disabled = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            deviceID: "d1",
+            name: "Off",
+            bundleID: "com.off",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: false
+        )
+        let missingField = TrackedAppInstall(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+            deviceID: "d1",
+            name: "Default",
+            bundleID: "com.default",
+            lastInstalledAt: formatter.string(from: now.addingTimeInterval(-6 * 24 * 3600)),
+            lastExpiresAt: expiresSoon,
+            autoUpdateEnabled: nil
+        )
+
+        let threshold: TimeInterval = 24 * 60 * 60
+        let due = [enabled, disabled, missingField].filter { install in
+            guard install.isAutoUpdateEnabled else { return false }
+            guard let expiresAt = install.expiresAt else { return false }
+            return expiresAt.timeIntervalSince(now) <= threshold
+        }
+        XCTAssertEqual(Set(due.map(\.id)), Set([enabled.id, missingField.id]))
+        XCTAssertFalse(due.contains(where: { $0.id == disabled.id }))
+    }
+
+    // MARK: - Auth error mapping
+
+    func testAuthErrorMessageMapsInvalidCredentials() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "invalid_credentials",
+            "msg": "Invalid login credentials",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertTrue(message.contains("Invalid email or password"))
+    }
+
+    func testAuthErrorMessagePrefersMsgWhenNoSpecialCode() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "some_other_error",
+            "msg": "Something went wrong upstream",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertEqual(message, "Something went wrong upstream")
+    }
+
+    func testAuthErrorMessageEmailNotConfirmed() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "email_not_confirmed",
+            "msg": "Email not confirmed",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertTrue(message.contains("Confirm email"))
+    }
+
 }

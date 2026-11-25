@@ -65,6 +65,14 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
     var lastInstalledAt: String?
     var lastExpiresAt: String?
     var lastAssetName: String?
+    /// Per-app opt-in for background auto-renew. Nil → true (migration default).
+    var autoUpdateEnabled: Bool?
+    /// SHA-256 of the last original (unsigned) IPA that was security-assessed / installed.
+    var lastIpaSha256: String?
+    var lastReportId: String?
+    var lastReportSha256: String?
+    var lastAssessmentStatus: String?
+    var lastSecurityCheckedAt: String?
 
     static let defaultGitHubRepo = "bobsupra/NuvioTVOS"
     static let signingLifetime: TimeInterval = 7 * 24 * 60 * 60
@@ -81,7 +89,13 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         lastInstalledTag: String? = nil,
         lastInstalledAt: String? = nil,
         lastExpiresAt: String? = nil,
-        lastAssetName: String? = nil
+        lastAssetName: String? = nil,
+        autoUpdateEnabled: Bool? = true,
+        lastIpaSha256: String? = nil,
+        lastReportId: String? = nil,
+        lastReportSha256: String? = nil,
+        lastAssessmentStatus: String? = nil,
+        lastSecurityCheckedAt: String? = nil
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -95,6 +109,17 @@ struct TrackedAppInstall: Identifiable, Codable, Equatable, Hashable {
         self.lastInstalledAt = lastInstalledAt
         self.lastExpiresAt = lastExpiresAt
         self.lastAssetName = lastAssetName
+        self.autoUpdateEnabled = autoUpdateEnabled
+        self.lastIpaSha256 = lastIpaSha256
+        self.lastReportId = lastReportId
+        self.lastReportSha256 = lastReportSha256
+        self.lastAssessmentStatus = lastAssessmentStatus
+        self.lastSecurityCheckedAt = lastSecurityCheckedAt
+    }
+
+    /// Whether this app participates in global Auto-renew when nearby. Missing config → true.
+    var isAutoUpdateEnabled: Bool {
+        autoUpdateEnabled ?? true
     }
 
     var isLocalIPA: Bool {
@@ -157,6 +182,8 @@ struct RenewioConfig: Codable, Equatable {
     var installs: [TrackedAppInstall]
     var selectedDeviceID: String?
     var autoRenewEnabled: Bool?
+    /// When true (default), manual renews show age/OSV review; auto-renew skips on elevated findings.
+    var securityReviewEnabled: Bool?
 
     static let currentSchemaVersion = 2
 
@@ -166,7 +193,8 @@ struct RenewioConfig: Codable, Equatable {
         devices: [TrackedDevice] = [],
         installs: [TrackedAppInstall] = [],
         selectedDeviceID: String? = nil,
-        autoRenewEnabled: Bool? = nil
+        autoRenewEnabled: Bool? = nil,
+        securityReviewEnabled: Bool? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.teamID = teamID
@@ -174,10 +202,15 @@ struct RenewioConfig: Codable, Equatable {
         self.installs = installs
         self.selectedDeviceID = selectedDeviceID
         self.autoRenewEnabled = autoRenewEnabled
+        self.securityReviewEnabled = securityReviewEnabled
     }
 
     var isAutoRenewEnabled: Bool {
         autoRenewEnabled ?? false
+    }
+
+    var isSecurityReviewEnabled: Bool {
+        securityReviewEnabled ?? true
     }
 
     var isComplete: Bool {
@@ -296,6 +329,29 @@ struct ReleaseOption: Identifiable, Hashable {
     let assetName: String
     let sizeBytes: Int64
     let isCached: Bool
+    let publishedAt: Date?
+    let assetID: Int?
+    let browserDownloadURL: URL?
+
+    init(
+        tag: String?,
+        version: String,
+        assetName: String,
+        sizeBytes: Int64,
+        isCached: Bool,
+        publishedAt: Date? = nil,
+        assetID: Int? = nil,
+        browserDownloadURL: URL? = nil
+    ) {
+        self.tag = tag
+        self.version = version
+        self.assetName = assetName
+        self.sizeBytes = sizeBytes
+        self.isCached = isCached
+        self.publishedAt = publishedAt
+        self.assetID = assetID
+        self.browserDownloadURL = browserDownloadURL
+    }
 
     var id: String { tag ?? assetName }
 
@@ -307,6 +363,10 @@ struct ReleaseOption: Identifiable, Hashable {
         sizeBytes > 0
             ? ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
             : ""
+    }
+
+    var isAgeEligible: Bool {
+        ReleaseAgePolicy.isEligible(publishedAt: publishedAt)
     }
 }
 
@@ -642,10 +702,37 @@ final class ConfigStore: ObservableObject {
         )
     }
 
-    static func fetchRecentReleases(repo: String, limit: Int = 3) async throws -> [ReleaseOption] {
+    /// Parses GitHub `published_at` / `created_at` ISO-8601 timestamps.
+    static func parseGitHubDate(_ raw: String?) -> Date? {
+        TrackedAppInstall.parseISO8601(raw)
+    }
+
+    /// IPA-bearing releases that meet the 14-day age floor, newest first (fetches up to 30).
+    static func fetchEligibleReleases(repo: String, now: Date = Date()) async throws -> [ReleaseOption] {
+        let releases = try await fetchRecentReleases(repo: repo, limit: 30, perPage: 30)
+        return releases.filter { ReleaseAgePolicy.isEligible(publishedAt: $0.publishedAt, now: now) }
+    }
+
+    /// Newest IPA-bearing release that meets the 14-day age floor (fetches up to 30 releases).
+    static func fetchLatestEligibleRelease(repo: String, now: Date = Date()) async throws -> ReleaseOption? {
+        try await fetchEligibleReleases(repo: repo, now: now).first
+    }
+
+    static func fetchRelease(repo: String, tag: String) async throws -> ReleaseOption? {
+        let needle = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
+        let releases = try await fetchRecentReleases(repo: repo, limit: 30, perPage: 30)
+        return releases.first { ($0.tag ?? "") == needle }
+    }
+
+    static func fetchRecentReleases(
+        repo: String,
+        limit: Int = 3,
+        perPage: Int = 10
+    ) async throws -> [ReleaseOption] {
         guard let trimmed = GitHubSource.normalize(repo),
               let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: "https://api.github.com/repos/\(encoded)/releases?per_page=10")
+              let url = URL(string: "https://api.github.com/repos/\(encoded)/releases?per_page=\(max(1, min(perPage, 100)))")
         else {
             throw NSError(
                 domain: "Renewio",
@@ -678,6 +765,8 @@ final class ConfigStore: ObservableObject {
 
         for rel in releases {
             let tag = (rel["tag_name"] as? String) ?? ""
+            let publishedAt = parseGitHubDate(rel["published_at"] as? String)
+                ?? parseGitHubDate(rel["created_at"] as? String)
             let assets = (rel["assets"] as? [[String: Any]]) ?? []
             let ipaAssets = assets.filter {
                 (($0["name"] as? String)?.lowercased().hasSuffix(".ipa") ?? false)
@@ -699,13 +788,18 @@ final class ConfigStore: ObservableObject {
                 version = tag
             }
 
+            let assetID = (chosen["id"] as? NSNumber)?.intValue
+            let browserURL = (chosen["browser_download_url"] as? String).flatMap(URL.init(string:))
             options.append(
                 ReleaseOption(
                     tag: tag,
                     version: version,
                     assetName: assetName,
                     sizeBytes: size,
-                    isCached: cachedFiles.contains(assetName)
+                    isCached: cachedFiles.contains(assetName),
+                    publishedAt: publishedAt,
+                    assetID: assetID,
+                    browserDownloadURL: browserURL
                 )
             )
             if options.count >= limit { break }
