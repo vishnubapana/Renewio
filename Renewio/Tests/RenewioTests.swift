@@ -474,4 +474,33 @@ final class RenewioTests: XCTestCase {
         XCTAssertFalse(due.contains(where: { $0.id == disabled.id }))
     }
 
+    // MARK: - Auth error mapping
+
+    func testAuthErrorMessageMapsInvalidCredentials() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "invalid_credentials",
+            "msg": "Invalid login credentials",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertTrue(message.contains("Invalid email or password"))
+    }
+
+    func testAuthErrorMessagePrefersMsgWhenNoSpecialCode() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "some_other_error",
+            "msg": "Something went wrong upstream",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertEqual(message, "Something went wrong upstream")
+    }
+
+    func testAuthErrorMessageEmailNotConfirmed() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "error_code": "email_not_confirmed",
+            "msg": "Email not confirmed",
+        ])
+        let message = SecurityClient.authErrorMessage(from: data, fallback: "fallback")
+        XCTAssertTrue(message.contains("Confirm email"))
+    }
+
 }

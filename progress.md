@@ -1,6 +1,6 @@
 # Renewio
 
-Status: **implemented** (updated 2026-11-24). Native macOS menu bar app that downloads unsigned IPAs from configurable GitHub repos (or local `.ipa` files), refreshes free/paid Xcode Personal Team profiles with Apple CLI tools, resigns apps, and installs them on paired Apple TV / iPhone / iPad devices via `devicectl`. Tracks each app per device with real provisioning profile expiry countdowns and local expiry notifications.
+Status: **implemented** (updated 2026-11-24). **v1.5.0** ships the shared pre-install security gate (Supabase + GHA), email/password security sign-in, per-app Auto-update, and pinned-tag age overrides. Native macOS menu bar app that downloads unsigned IPAs from configurable GitHub repos (or local `.ipa` files), refreshes free/paid Xcode Personal Team profiles with Apple CLI tools, resigns apps, and installs them on paired Apple TV / iPhone / iPad devices via `devicectl`. Tracks each app per device with real provisioning profile expiry countdowns and local expiry notifications.
 
 ## Shared security verification (Supabase + GHA)
 
@@ -21,7 +21,7 @@ Signing credentials never leave the Mac. Shared reports are keyed by unsigned IP
 - [`supabase/`](supabase/) — Postgres migration, Edge Functions (`request-scan`, `submit-report`, `check-eligibility`, `record-approval`, `revoke-approval`, `scan-status`, `recheck-vulns`)
 - [`Renewio/Sources/Security/`](Renewio/Sources/Security/) — client, hasher, eligibility, approvals, IPA download
 
-Configure `RenewioSupabaseURL` + `RenewioSupabaseAnonKey` in Info.plist (or env). Sign in under Settings. Create a **dedicated** Supabase project; do not apply migrations to unrelated apps. Prefer Pro (or keepalive) to avoid Free-tier pause.
+Configure `RenewioSupabaseURL` + `RenewioSupabaseAnonKey` in Info.plist (or env). Sign in under Settings with **email + password** (turn Confirm email off on the Security-Scanner project so signup needs no SMTP). Create a **dedicated** Supabase project; do not apply migrations to unrelated apps. Prefer Pro (or keepalive) to avoid Free-tier pause.
 
 Offline same-artifact renew: 72h grace if last local assessment was Checks Passed (or Review Required with a stored approval). Upgrades fail closed when the backend is unreachable.
 

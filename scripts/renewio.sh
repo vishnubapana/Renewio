@@ -608,13 +608,20 @@ refresh_signing() {
   rm -rf "$derived"
   mkdir -p "$derived"
 
+  # Prefer the concrete paired device so Apple registers it on first use.
+  # generic/platform=* fails with "team has no devices" until that happens.
+  local destination="$XCODE_DESTINATION"
+  if [[ -n "$DEVICE_ID" ]]; then
+    destination="id=${DEVICE_ID}"
+  fi
+
   local build_log="$WORK_DIR/xcodebuild.log"
   set +e
   /usr/bin/xcodebuild \
     -project "$STUB_ROOT/ProvisioningStub.xcodeproj" \
     -scheme "$STUB_SCHEME" \
     -configuration Debug \
-    -destination "$XCODE_DESTINATION" \
+    -destination "$destination" \
     -derivedDataPath "$derived" \
     DEVELOPMENT_TEAM="$TEAM_ID" \
     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
@@ -623,6 +630,24 @@ refresh_signing() {
     -allowProvisioningDeviceRegistration \
     build >"$build_log" 2>&1
   rc=$?
+
+  # Fall back to generic destination if the device-specific one is flaky.
+  if [[ $rc -ne 0 && -n "$DEVICE_ID" && "$destination" != "$XCODE_DESTINATION" ]]; then
+    info "Device-specific provisioning failed; retrying with ${XCODE_DESTINATION}."
+    /usr/bin/xcodebuild \
+      -project "$STUB_ROOT/ProvisioningStub.xcodeproj" \
+      -scheme "$STUB_SCHEME" \
+      -configuration Debug \
+      -destination "$XCODE_DESTINATION" \
+      -derivedDataPath "$derived" \
+      DEVELOPMENT_TEAM="$TEAM_ID" \
+      PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+      CODE_SIGN_STYLE=Automatic \
+      -allowProvisioningUpdates \
+      -allowProvisioningDeviceRegistration \
+      build >"$build_log" 2>&1
+    rc=$?
+  fi
   set -e
 
   if [[ $rc -ne 0 ]]; then

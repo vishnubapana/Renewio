@@ -37,8 +37,7 @@ struct OnboardingView: View {
     @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
     @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
     @State private var securityEmail = ""
-    @State private var securityOTP = ""
-    @State private var securityOTPSent = false
+    @State private var securityPassword = ""
     @State private var securityBusy = false
 
     /// Scroll anchor to restore when the edit panel closes.
@@ -1021,7 +1020,7 @@ struct OnboardingView: View {
                 .foregroundStyle(RenewioTheme.foreground)
             Text(
                 SecurityConfig.isConfigured
-                    ? "Sign in to request shared security scans (magic link OTP)."
+                    ? "Sign in with email and password to request shared security scans. No magic link required."
                     : "Set RenewioSupabaseURL / RenewioSupabaseAnonKey in Info.plist to enable shared scanning."
             )
             .font(.system(size: 11))
@@ -1034,54 +1033,57 @@ struct OnboardingView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(RenewioTheme.success)
                     Spacer()
-                    Button("Sign out") {
-                        model.securityClient.signOut()
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
+                    PopoverIconButton(
+                        systemImage: "rectangle.portrait.and.arrow.right",
+                        hoverTint: RenewioTheme.danger,
+                        helpText: "Sign out",
+                        action: { model.securityClient.signOut() }
+                    )
                 }
             } else if SecurityConfig.isConfigured {
                 TextField("Email", text: $securityEmail)
                     .textFieldStyle(.roundedBorder)
-                if securityOTPSent {
-                    TextField("One-time code", text: $securityOTP)
-                        .textFieldStyle(.roundedBorder)
-                    Button(securityBusy ? "Verifying…" : "Verify code") {
-                        Task { await verifySecurityOTP() }
+                    .textContentType(.username)
+                SecureField("Password", text: $securityPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.password)
+                HStack(spacing: 8) {
+                    Button(securityBusy ? "Signing in…" : "Sign in") {
+                        Task { await securitySignIn() }
                     }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(securityBusy || securityOTP.isEmpty)
-                } else {
-                    Button(securityBusy ? "Sending…" : "Send sign-in code") {
-                        Task { await sendSecurityOTP() }
+                    .disabled(securityBusy || securityEmail.isEmpty || securityPassword.isEmpty)
+
+                    Button(securityBusy ? "Creating…" : "Create account") {
+                        Task { await securitySignUp() }
                     }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(securityBusy || securityEmail.isEmpty)
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(securityBusy || securityEmail.isEmpty || securityPassword.isEmpty)
                 }
             }
         }
         .padding(.top, 4)
     }
 
-    private func sendSecurityOTP() async {
+    private func securitySignIn() async {
         securityBusy = true
         defer { securityBusy = false }
         do {
-            try await model.securityClient.signInWithOTP(email: securityEmail)
-            securityOTPSent = true
-            showTemporaryInfo("Check your email for a one-time code.")
+            try await model.securityClient.signIn(email: securityEmail, password: securityPassword)
+            securityPassword = ""
+            showTemporaryInfo("Signed in for shared security scanning.")
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func verifySecurityOTP() async {
+    private func securitySignUp() async {
         securityBusy = true
         defer { securityBusy = false }
         do {
-            try await model.securityClient.verifyOTP(email: securityEmail, token: securityOTP)
-            securityOTP = ""
-            securityOTPSent = false
-            showTemporaryInfo("Signed in for shared security scanning.")
+            try await model.securityClient.signUp(email: securityEmail, password: securityPassword)
+            securityPassword = ""
+            showTemporaryInfo("Account created and signed in.")
         } catch {
             errorMessage = error.localizedDescription
         }

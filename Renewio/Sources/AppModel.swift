@@ -101,6 +101,14 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Nested ObservableObject — Settings sign-in/out must refresh views that only observe AppModel.
+        securityClient.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         refreshMenuBarIcon()
         startMenuBarIconTimer()
         startBackgroundScheduler()

@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +17,119 @@ function json(body: unknown, status = 200): Response {
 const DAILY_QUOTA = 20;
 const POLICY = "v1";
 const BUNDLE = "1.0.0";
+const TERMINAL = new Set(["failed", "timed_out", "succeeded"]);
+
+type JobRow = {
+  id: string;
+  status: string;
+  [key: string]: unknown;
+};
+
+type DispatchInputs = {
+  owner: string;
+  repo: string;
+  tag: string;
+  commit: string | null;
+  assetId: string | null;
+  ipaSha: string;
+  policyVersion: string;
+  publishedAt: string | null;
+};
+
+async function resetTerminalJob(
+  admin: SupabaseClient,
+  jobId: string,
+  userId: string,
+): Promise<JobRow | null> {
+  const { data, error } = await admin
+    .from("scan_jobs")
+    .update({
+      status: "queued",
+      error: null,
+      completed_at: null,
+      gha_run_id: null,
+      requested_by: userId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return data as JobRow;
+}
+
+async function dispatchScan(
+  admin: SupabaseClient,
+  jobId: string,
+  userId: string,
+  supabaseUrl: string,
+  inputs: DispatchInputs,
+): Promise<Response | null> {
+  const ghToken = Deno.env.get("GITHUB_DISPATCH_TOKEN");
+  const ghRepo = Deno.env.get("SCANNER_GITHUB_REPO"); // owner/repo
+  const callbackUrl = `${supabaseUrl}/functions/v1/submit-report`;
+
+  if (!ghToken || !ghRepo) {
+    await admin.from("audit_events").insert({
+      actor_user_id: userId,
+      event_type: "scan_queued_no_dispatch",
+      payload: { job_id: jobId, reason: "missing GITHUB_DISPATCH_TOKEN or SCANNER_GITHUB_REPO" },
+    });
+    return null;
+  }
+
+  try {
+    const resp = await fetch(
+      `https://api.github.com/repos/${ghRepo}/actions/workflows/scan-release.yml/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ghToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ref: "main",
+          inputs: {
+            job_id: jobId,
+            github_owner: inputs.owner,
+            github_repo: inputs.repo,
+            release_tag: inputs.tag,
+            source_commit: inputs.commit || "",
+            asset_id: inputs.assetId || "",
+            expected_sha256: inputs.ipaSha,
+            policy_version: inputs.policyVersion,
+            callback_url: callbackUrl,
+            published_at: inputs.publishedAt || "",
+          },
+        }),
+      },
+    );
+    if (!resp.ok) {
+      const detail = await resp.text();
+      await admin.from("scan_jobs").update({
+        status: "failed",
+        error: `gha_dispatch_failed: ${detail.slice(0, 500)}`,
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
+      return json({ error: "gha_dispatch_failed", detail }, 502);
+    }
+    await admin.from("scan_jobs").update({
+      status: "scanning",
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId);
+  } catch (e) {
+    const detail = String(e);
+    await admin.from("scan_jobs").update({
+      status: "failed",
+      error: detail,
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId);
+    return json({ error: "gha_dispatch_failed", detail }, 502);
+  }
+
+  return null;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -101,6 +214,16 @@ Deno.serve(async (req) => {
   await admin.from("artifacts").upsert({ ipa_sha256: ipaSha, release_id: releaseRow.id });
 
   const dedupeKey = `${ipaSha}|${policyVersion}|${BUNDLE}`;
+  const dispatchInputs: DispatchInputs = {
+    owner,
+    repo,
+    tag,
+    commit,
+    assetId,
+    ipaSha,
+    policyVersion,
+    publishedAt,
+  };
 
   // Existing valid report?
   const { data: existingReport } = await admin
@@ -147,95 +270,74 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { data: job, error: jobErr } = await admin
+  // Reuse terminal row for this dedupe_key (unique constraint) instead of insert-failing forever.
+  const { data: existingJob } = await admin
     .from("scan_jobs")
-    .insert({
-      artifact_id: ipaSha,
-      policy_version: policyVersion,
-      scanner_bundle_version: BUNDLE,
-      status: "queued",
-      dedupe_key: dedupeKey,
-      requested_by: userId,
-    })
     .select("*")
-    .single();
+    .eq("dedupe_key", dedupeKey)
+    .maybeSingle();
 
-  if (jobErr) {
-    // Race: another insert won
-    const { data: raced } = await admin.from("scan_jobs").select("*").eq("dedupe_key", dedupeKey).maybeSingle();
-    if (raced) {
-      return json({
-        job_id: raced.id,
-        status: raced.status,
-        scan_status: raced.status,
-        assessment_status: null,
-        report_id: null,
-      });
-    }
-    return json({ error: "job_create_failed", detail: jobErr.message }, 500);
-  }
+  let job: JobRow | null = null;
 
-  // Dispatch GitHub Actions
-  const ghToken = Deno.env.get("GITHUB_DISPATCH_TOKEN");
-  const ghRepo = Deno.env.get("SCANNER_GITHUB_REPO"); // owner/repo
-  const callbackUrl = `${supabaseUrl}/functions/v1/submit-report`;
+  if (existingJob && TERMINAL.has(String(existingJob.status))) {
+    job = await resetTerminalJob(admin, existingJob.id, userId);
+    if (!job) return json({ error: "job_reset_failed" }, 500);
+  } else if (!existingJob) {
+    const { data: inserted, error: jobErr } = await admin
+      .from("scan_jobs")
+      .insert({
+        artifact_id: ipaSha,
+        policy_version: policyVersion,
+        scanner_bundle_version: BUNDLE,
+        status: "queued",
+        dedupe_key: dedupeKey,
+        requested_by: userId,
+      })
+      .select("*")
+      .single();
 
-  let dispatchError: string | null = null;
-  if (ghToken && ghRepo) {
-    try {
-      const resp = await fetch(`https://api.github.com/repos/${ghRepo}/actions/workflows/scan-release.yml/dispatches`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${ghToken}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ref: "main",
-          inputs: {
-            job_id: job.id,
-            github_owner: owner,
-            github_repo: repo,
-            release_tag: tag,
-            source_commit: commit || "",
-            asset_id: assetId || "",
-            expected_sha256: ipaSha,
-            policy_version: policyVersion,
-            callback_url: callbackUrl,
-            published_at: publishedAt || "",
-          },
-        }),
-      });
-      if (!resp.ok) {
-        dispatchError = await resp.text();
-        await admin.from("scan_jobs").update({
-          status: "failed",
-          error: `gha_dispatch_failed: ${dispatchError.slice(0, 500)}`,
-          updated_at: new Date().toISOString(),
-        }).eq("id", job.id);
-        return json({ error: "gha_dispatch_failed", detail: dispatchError }, 502);
+    if (jobErr) {
+      // Race: another insert won — re-read and handle.
+      const { data: raced } = await admin.from("scan_jobs").select("*").eq("dedupe_key", dedupeKey).maybeSingle();
+      if (!raced) return json({ error: "job_create_failed", detail: jobErr.message }, 500);
+
+      if (raced.status === "queued" || raced.status === "scanning") {
+        return json({
+          job_id: raced.id,
+          status: raced.status,
+          scan_status: raced.status,
+          assessment_status: null,
+          report_id: null,
+        });
       }
-      await admin.from("scan_jobs").update({
-        status: "scanning",
-        updated_at: new Date().toISOString(),
-      }).eq("id", job.id);
-    } catch (e) {
-      dispatchError = String(e);
-      await admin.from("scan_jobs").update({
-        status: "failed",
-        error: dispatchError,
-        updated_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      return json({ error: "gha_dispatch_failed", detail: dispatchError }, 502);
+
+      if (TERMINAL.has(String(raced.status))) {
+        job = await resetTerminalJob(admin, raced.id, userId);
+        if (!job) return json({ error: "job_reset_failed" }, 500);
+      } else {
+        return json({ error: "job_create_failed", detail: jobErr.message }, 500);
+      }
+    } else {
+      job = inserted as JobRow;
     }
   } else {
-    // Dev mode: leave queued for manual workflow / local submit
-    await admin.from("audit_events").insert({
-      actor_user_id: userId,
-      event_type: "scan_queued_no_dispatch",
-      payload: { job_id: job.id, reason: "missing GITHUB_DISPATCH_TOKEN or SCANNER_GITHUB_REPO" },
+    // Unexpected non-terminal, non-inflight status — treat as race return.
+    return json({
+      job_id: existingJob.id,
+      status: existingJob.status,
+      scan_status: existingJob.status,
+      assessment_status: null,
+      report_id: null,
     });
   }
+
+  if (!job) return json({ error: "job_create_failed" }, 500);
+
+  const dispatchFail = await dispatchScan(admin, job.id, userId, supabaseUrl, dispatchInputs);
+  if (dispatchFail) return dispatchFail;
+
+  const ghToken = Deno.env.get("GITHUB_DISPATCH_TOKEN");
+  const ghRepo = Deno.env.get("SCANNER_GITHUB_REPO");
 
   await admin.from("audit_events").insert({
     actor_user_id: userId,

@@ -82,57 +82,110 @@ final class SecurityClient: ObservableObject {
 
     var isSignedIn: Bool { accessToken != nil && !(accessToken?.isEmpty ?? true) }
 
-    func signInWithOTP(email: String) async throws {
-        guard let base = SecurityConfig.supabaseURL, let anon = SecurityConfig.supabaseAnonKey else {
-            throw SecurityClientError.notConfigured
+    func signUp(email: String, password: String) async throws {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty, !password.isEmpty else {
+            throw SecurityClientError.scanFailed("Enter an email and password.")
         }
-        let url = base.appendingPathComponent("auth/v1/otp")
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(anon, forHTTPHeaderField: "apikey")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "email": email,
-            "create_user": true,
-        ])
-        let (_, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SecurityClientError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "otp_failed")
-        }
-        userEmail = email
-        KeychainStore.saveSecurityUserEmail(email)
+        guard let base = SecurityConfig.supabaseURL else { throw SecurityClientError.notConfigured }
+        try await postAuth(
+            url: base.appendingPathComponent("auth/v1/signup"),
+            body: ["email": trimmedEmail, "password": password],
+            emailHint: trimmedEmail,
+            fallbackError: "Could not create account."
+        )
     }
 
-    func verifyOTP(email: String, token: String) async throws {
-        guard let base = SecurityConfig.supabaseURL, let anon = SecurityConfig.supabaseAnonKey else {
+    func signIn(email: String, password: String) async throws {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty, !password.isEmpty else {
+            throw SecurityClientError.scanFailed("Enter an email and password.")
+        }
+        guard let base = SecurityConfig.supabaseURL else { throw SecurityClientError.notConfigured }
+        var components = URLComponents(url: base.appendingPathComponent("auth/v1/token"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "grant_type", value: "password")]
+        guard let url = components?.url else { throw SecurityClientError.notConfigured }
+        try await postAuth(
+            url: url,
+            body: ["email": trimmedEmail, "password": password],
+            emailHint: trimmedEmail,
+            fallbackError: "Invalid email or password."
+        )
+    }
+
+    private func postAuth(
+        url: URL,
+        body: [String: String],
+        emailHint: String,
+        fallbackError: String
+    ) async throws {
+        guard let anon = SecurityConfig.supabaseAnonKey else {
             throw SecurityClientError.notConfigured
         }
-        let url = base.appendingPathComponent("auth/v1/verify")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(anon, forHTTPHeaderField: "apikey")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "email": email,
-            "token": token,
-            "type": "email",
-        ])
+        req.setValue("Bearer \(anon)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw SecurityClientError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, body)
+            throw SecurityClientError.http(
+                (resp as? HTTPURLResponse)?.statusCode ?? 0,
+                Self.authErrorMessage(from: data, fallback: fallbackError)
+            )
         }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let access = json["access_token"] as? String
-        else { throw SecurityClientError.decoding }
-        accessToken = access
-        userEmail = email
-        KeychainStore.saveSecurityAccessToken(access)
-        KeychainStore.saveSecurityUserEmail(email)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SecurityClientError.decoding
+        }
+        guard let access = json["access_token"] as? String, !access.isEmpty else {
+            // GoTrue often returns 200 for repeated signup with no session and no password update.
+            throw SecurityClientError.scanFailed(
+                "No session returned. If this email already exists, use Sign in (set a password in Supabase Auth → Users if you only used magic link before). Also turn Confirm email off under Auth → Providers."
+            )
+        }
+        let emailFromUser = (json["user"] as? [String: Any])?["email"] as? String
+        applySession(accessToken: access, email: emailFromUser ?? emailHint)
+    }
+
+    private func applySession(accessToken: String, email: String?) {
+        self.accessToken = accessToken
+        KeychainStore.saveSecurityAccessToken(accessToken)
+        if let email, !email.isEmpty {
+            userEmail = email
+            KeychainStore.saveSecurityUserEmail(email)
+        }
+    }
+
+    /// Prefer GoTrue `msg` / `error_description`.
+    nonisolated static func authErrorMessage(from data: Data, fallback: String) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? fallback : raw
+        }
+        let code = (json["error_code"] as? String) ?? ""
+        let msg = (json["msg"] as? String)
+            ?? (json["error_description"] as? String)
+            ?? (json["message"] as? String)
+            ?? fallback
+        if code == "email_not_confirmed" {
+            return "Email not confirmed. Turn off Confirm email in Supabase Auth → Providers, or confirm the account in the dashboard."
+        }
+        if code == "user_already_exists" || msg.lowercased().contains("already registered") {
+            return "Account already exists. Use Sign in. If you only used magic link before, set a password in Supabase Auth → Users."
+        }
+        if code == "invalid_credentials" {
+            return "Invalid email or password. If Create account said the user already exists, set a password in Supabase Auth → Users, then Sign in."
+        }
+        if code == "over_email_send_rate_limit" || msg.lowercased().contains("rate limit") {
+            return "Email rate limit hit. Password auth should not need mail — check Auth → Providers → Confirm email is off."
+        }
+        return msg
     }
 
     func signOut() {
         accessToken = nil
+        userEmail = nil
         KeychainStore.deleteSecurityAccessToken()
     }
 
