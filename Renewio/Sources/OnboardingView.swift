@@ -36,6 +36,7 @@ struct OnboardingView: View {
     @State private var githubTokenInput = ""
     @State private var hasSavedGitHubToken = KeychainStore.hasGitHubToken
     @State private var cacheSizeBytes: Int64 = ConfigStore.cacheSizeBytes()
+    @State private var workScratchBytes: Int64 = ConfigStore.workScratchSizeBytes()
     @State private var securityEmail = ""
     @State private var securityPassword = ""
     @State private var securityBusy = false
@@ -752,6 +753,20 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(cacheSizeBytes == 0)
+
+                    Button {
+                        clearWorkScratch()
+                    } label: {
+                        let formatted = ByteCountFormatter.string(fromByteCount: workScratchBytes, countStyle: .file)
+                        Label(
+                            workScratchBytes > 0 ? "Clear Work (\(formatted))" : "Work Empty",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(workScratchBytes == 0)
+                    .help("Remove PayloadExtract and DerivedData left by renew")
                 }
             }
         }
@@ -805,6 +820,7 @@ struct OnboardingView: View {
         launchAtLogin = LaunchAtLoginManager.isEnabled
         hasSavedGitHubToken = KeychainStore.hasGitHubToken
         cacheSizeBytes = ConfigStore.cacheSizeBytes()
+        workScratchBytes = ConfigStore.workScratchSizeBytes()
 
         if let editID = model.editingInstallID,
            let target = draftInstalls.first(where: { $0.id == editID }) {
@@ -1117,6 +1133,18 @@ struct OnboardingView: View {
             showTemporaryInfo("Cleared IPA cache (\(formatted) freed).")
         } catch {
             errorMessage = "Could not clear cache: \(error.localizedDescription)"
+        }
+    }
+
+    private func clearWorkScratch() {
+        errorMessage = nil
+        do {
+            let freed = try ConfigStore.clearWorkScratch()
+            workScratchBytes = ConfigStore.workScratchSizeBytes()
+            let formatted = ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)
+            showTemporaryInfo("Cleared renew work scratch (\(formatted) freed).")
+        } catch {
+            errorMessage = "Could not clear work scratch: \(error.localizedDescription)"
         }
     }
 

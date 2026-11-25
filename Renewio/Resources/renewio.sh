@@ -191,9 +191,18 @@ info() {
   emit "[INFO] $*"
 }
 
+# Drop bulky extract/build dirs; keep small JSON/logs for debugging.
+cleanup_work_scratch() {
+  local d
+  for d in PayloadExtract DerivedData DerivedData2; do
+    rm -rf "${WORK_DIR:?}/$d"
+  done
+}
+
 fail() {
   local message="$1"
   local stage_id="${CURRENT_STAGE:-unknown}"
+  cleanup_work_scratch
   emit "[ERROR] ${stage_id}|${message}"
   exit 1
 }
@@ -870,12 +879,14 @@ main() {
   resign_app
 
   if [[ "$SKIP_INSTALL" == "1" ]]; then
+    cleanup_work_scratch
     emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|signed only (install skipped)|${PROFILE_EXPIRES_AT}"
     exit 0
   fi
 
   install_app
   write_success_state
+  cleanup_work_scratch
   local display_app="${APP_NAME:-$(basename "${APP_PATH:-App}" .app)}"
   emit "[RESULT] ok|${RELEASE_VERSION}|${DEVICE_NAME}|${display_app} ${RELEASE_VERSION} installed on ${DEVICE_NAME}.|${PROFILE_EXPIRES_AT}"
 }

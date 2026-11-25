@@ -560,6 +560,49 @@ final class ConfigStore: ObservableObject {
             .appendingPathComponent("Renewio/downloads", isDirectory: true)
     }
 
+    /// Bulky scratch left by renewio.sh (IPA extract + xcodebuild DerivedData).
+    nonisolated static var workDirectoryURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Renewio/work", isDirectory: true)
+    }
+
+    nonisolated private static var workScratchDirectoryNames: [String] {
+        ["PayloadExtract", "DerivedData", "DerivedData2"]
+    }
+
+    nonisolated static func workScratchSizeBytes() -> Int64 {
+        let fm = FileManager.default
+        var total: Int64 = 0
+        for name in workScratchDirectoryNames {
+            let dir = workDirectoryURL.appendingPathComponent(name, isDirectory: true)
+            guard let enumerator = fm.enumerator(
+                at: dir,
+                includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                guard let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                      vals.isRegularFile == true
+                else { continue }
+                total += Int64(vals.fileSize ?? 0)
+            }
+        }
+        return total
+    }
+
+    @discardableResult
+    nonisolated static func clearWorkScratch() throws -> Int64 {
+        let freed = workScratchSizeBytes()
+        let fm = FileManager.default
+        for name in workScratchDirectoryNames {
+            let dir = workDirectoryURL.appendingPathComponent(name, isDirectory: true)
+            if fm.fileExists(atPath: dir.path) {
+                try fm.removeItem(at: dir)
+            }
+        }
+        return freed
+    }
+
     static func downloadsDirectoryURL(forRepo repo: String) -> URL {
         let dir = downloadsRootURL.appendingPathComponent(repoFolderName(repo), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
